@@ -1,0 +1,59 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publiceer naar GitHub Releases"
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Test
+        run: npm test
+
+      - name: Sync GitHub repository metadata
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: node scripts/sync-repository.js
+
+      - name: Build and publish installer
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          NODE_OPTIONS: "--use-system-ca"
+        run: |
+          npm run clean
+          npm run build
+          node --use-system-ca node_modules/electron-builder/cli.js --win nsis --publish always
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: |
+            release/Video-Compressor-*-Setup.exe
+            release/Video-Compressor-*-Setup.exe.blockmap
+            release/latest.yml

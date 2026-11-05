@@ -1,0 +1,98 @@
+{
+  "name": "video-compressor",
+  "version": "1.2.0",
+  "description": "Desktop TS naar MP4 video compressor met FFmpeg.",
+  "author": {
+    "name": "Video Compressor"
+  },
+  "license": "MIT",
+  "main": "dist/src/main.js",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/codebywout/compressor-to-mp4.git"
+  },
+  "scripts": {
+    "clean": "node scripts/clean.js",
+    "build": "tsc && node scripts/copy-static.js",
+    "start": "npm run build && electron .",
+    "test": "npm run build && node --test dist/test/*.test.js",
+    "typecheck": "tsc --noEmit",
+    "sync:repo": "node scripts/sync-repository.js",
+    "bump": "node scripts/bump-version.js",
+    "dist": "npm run clean && npm run build && node --use-system-ca node_modules/electron-builder/cli.js --win nsis --publish never",
+    "dist:dir": "npm run clean && npm run build && node --use-system-ca node_modules/electron-builder/cli.js --win dir --publish never",
+    "release": "node scripts/release.js",
+    "release:publish": "node scripts/release.js --publish"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "electron": "^45.2.3",
+    "electron-builder": "^26.18.0",
+    "typescript": "^5.7.2"
+  },
+  "dependencies": {
+    "electron-updater": "6.8.11"
+  },
+  "build": {
+    "appId": "com.video-compressor.desktop",
+    "productName": "Video Compressor",
+    "copyright": "Copyright © Video Compressor",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/src/**/*",
+      "package.json"
+    ],
+    "extraMetadata": {
+      "main": "dist/src/main.js"
+    },
+    "asar": true,
+    "publish": {
+      "provider": "github",
+      "owner": "codebywout",
+      "repo": "compressor-to-mp4",
+      "releaseType": "release"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico",
+      "executableName": "VideoCompressor",
+      "artifactName": "Video-Compressor-${version}-Setup.${ext}",
+      "legalTrademarks": "Video Compressor",
+      "signAndEditExecutable": true,
+      "signExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowElevation": true,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": "always",
+      "createStartMenuShortcut": true,
+      "shortcutName": "Video Compressor",
+      "uninstallDisplayName": "Video Compressor ${version}",
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "include": "build/installer.nsh",
+      "deleteAppDataOnUninstall": true,
+      "runAfterFinish": true,
+      "displayLanguageSelector": false,
+      "installerLanguages": [
+        "nl_NL",
+        "en_US"
+      ],
+      "language": "1043",
+      "warningsAsErrors": false,
+      "artifactName": "Video-Compressor-${version}-Setup.${ext}"
+    }
+  }
+}
