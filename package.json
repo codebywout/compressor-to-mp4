@@ -1,6 +1,6 @@
 {
   "name": "video-compressor",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Desktop TS naar MP4 video compressor met FFmpeg.",
   "author": {
     "name": "Video Compressor"

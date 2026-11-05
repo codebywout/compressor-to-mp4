@@ -31,6 +31,16 @@ function notesToText(notes: UpdateInfo["releaseNotes"]): string | null {
   return notes.map((entry) => entry.note).filter(Boolean).join("\n").trim() || null;
 }
 
+function friendlyUpdateError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  if (/Cannot find latest\.yml|latest\.yml.*404|HttpError:\s*404/i.test(message)) {
+    return "Updatecontrole mislukt: de nieuwste GitHub Release mist installer-bestanden (latest.yml). Publiceer opnieuw via de release-workflow.";
+  }
+  if (!message) return "Updatecontrole mislukt.";
+  const short = message.split("\n")[0]?.trim() || message;
+  return short.length > 220 ? `${short.slice(0, 217)}…` : short;
+}
+
 export class AppUpdater {
   private state: UpdateState;
   private listener: UpdateListener | null = null;
@@ -102,7 +112,7 @@ export class AppUpdater {
     autoUpdater.on("error", (error) => {
       this.patch({
         status: "error",
-        message: error?.message ? `Update mislukt: ${error.message}` : "Update mislukt.",
+        message: friendlyUpdateError(error),
         percent: 0
       });
     });
@@ -148,7 +158,7 @@ export class AppUpdater {
     } catch (error) {
       this.patch({
         status: "error",
-        message: `Updatecontrole mislukt: ${(error as Error).message}`
+        message: friendlyUpdateError(error)
       });
     }
     return this.getState();

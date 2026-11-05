@@ -59,8 +59,10 @@ jobs:
             release/Video-Compressor-*-Setup.exe
             release/Video-Compressor-*-Setup.exe.blockmap
             release/latest.yml
+          name: ${{ github.ref_name }}
           generate_release_notes: true
           fail_on_unmatched_files: true
+          make_latest: true
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
