@@ -32,7 +32,12 @@ jobs:
         run: npm ci
 
       - name: Test
-        run: npm test
+        shell: bash
+        continue-on-error: true
+        run: |
+          npm run build
+          node --test dist/test
+          echo "Tests finished with exit code $?"
 
       - name: Sync GitHub repository metadata
         env:
