@@ -4,16 +4,27 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Video Compressor</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Syne:wght@600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 </head>
 <body spellcheck="false">
+  <div class="app-glow" aria-hidden="true"></div>
+
   <header>
     <div class="shell header-inner">
       <div class="brand">
-        <span class="logo" aria-hidden="true">VC</span>
+        <span class="logo" aria-hidden="true">
+          <svg viewBox="0 0 32 32" width="20" height="20" fill="none">
+            <rect x="3" y="7" width="18" height="18" rx="3" stroke="currentColor" stroke-width="2"/>
+            <path d="M21 13h5l3 3v6l-3 3h-5" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+            <path d="M8 13h8M8 18h5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+        </span>
         <div>
+          <p class="brand-kicker">Desktop tool</p>
           <h1>Video Compressor</h1>
-          <p>Comprimeer of converteer video's naar MP4</p>
         </div>
       </div>
       <div class="header-meta">
@@ -27,7 +38,7 @@
     <section id="update-panel" class="banner update-banner hidden" data-status="idle">
       <div class="banner-top">
         <div>
-          <h2>Update</h2>
+          <h2>Update beschikbaar</h2>
           <p id="update-status">Nog niet gecontroleerd.</p>
         </div>
         <div class="button-row update-actions">
@@ -70,7 +81,7 @@
       <section class="queue-column">
         <section id="drop-zone" class="drop-zone">
           <div class="upload-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
               <path d="M12 16V5"/><path d="M8 9l4-4 4 4"/><path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>
             </svg>
           </div>
@@ -82,7 +93,7 @@
             <p class="drop-empty">of kies ze op je computer. Je kunt blijven toevoegen.</p>
           </div>
           <button id="select-button" class="primary" type="button">Bestanden selecteren</button>
-          <small>TS, M2TS, MP4, MOV, MKV en AVI</small>
+          <small>TS · M2TS · MP4 · MOV · MKV · AVI</small>
         </section>
 
         <section id="files-section" class="panel hidden">
@@ -156,7 +167,7 @@
             <label class="switch wide-field"><input id="keep-audio" type="checkbox" checked><span class="switch-ui" aria-hidden="true"></span>Audio behouden</label>
           </div>
 
-          <p class="hint">De MP4 komt in dezelfde map als het bronbestand. Start gebruikt deze instellingen; een doelgrootte op een kaart geldt alleen voor dat bestand.</p>
+          <p class="hint">De MP4 komt naast het bronbestand. Start gebruikt deze instellingen; een doelgrootte op een kaart geldt alleen voor dat bestand.</p>
           <button id="reset-targets" class="secondary wide" type="button">Afwijkende doelgroottes wissen</button>
         </section>
       </aside>
