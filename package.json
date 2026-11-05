@@ -21,6 +21,7 @@
     "bump": "node scripts/bump-version.js",
     "dist": "npm run clean && npm run build && node --use-system-ca node_modules/electron-builder/cli.js --win nsis --publish never",
     "dist:dir": "npm run clean && npm run build && node --use-system-ca node_modules/electron-builder/cli.js --win dir --publish never",
+    "dist:publish": "npm run clean && npm run build && node --use-system-ca node_modules/electron-builder/cli.js --win nsis --publish always",
     "release": "node scripts/release.js",
     "release:publish": "node scripts/release.js --publish"
   },

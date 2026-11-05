@@ -45,14 +45,12 @@ jobs:
         run: node scripts/sync-repository.js
 
       - name: Build and publish installer
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
           NODE_OPTIONS: "--use-system-ca"
-        run: |
-          npm run clean
-          npm run build
-          node --use-system-ca node_modules/electron-builder/cli.js --win nsis --publish always
+        run: npm run dist:publish
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
