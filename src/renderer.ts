@@ -524,6 +524,7 @@ function applyUpdateState(state: UpdateState): void {
   $("update-progress").style.width = `${Math.max(0, Math.min(100, state.percent))}%`;
   $("update-download").classList.toggle("hidden", state.status !== "available");
   $("update-install").classList.toggle("hidden", state.status !== "downloaded");
+  $("update-later").classList.toggle("hidden", state.status !== "available" && state.status !== "downloaded");
   $<HTMLButtonElement>("update-check").disabled = state.status === "checking" || state.status === "downloading";
   $<HTMLButtonElement>("update-download").disabled = state.status === "downloading";
   $<HTMLButtonElement>("check-updates").disabled = state.status === "checking" || state.status === "downloading";
@@ -573,6 +574,10 @@ $("update-download").onclick = async () => {
 $("update-install").onclick = async () => {
   try { await getApi().installUpdate(); }
   catch (error) { toast((error as Error).message, "error"); }
+};
+$("update-later").onclick = () => {
+  $("update-panel").classList.add("hidden");
+  toast("Je kunt later updaten via het versienummer rechtsboven.");
 };
 
 document.querySelectorAll('input[name="processing-mode"]').forEach((input) => input.addEventListener("change", onSettingsChanged));

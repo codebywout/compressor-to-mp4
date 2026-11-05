@@ -23,6 +23,23 @@ function remove(target) {
   }
 }
 
+function truncateLockedFiles(dir) {
+  if (!fs.existsSync(dir)) return;
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      truncateLockedFiles(full);
+      continue;
+    }
+    try {
+      fs.writeFileSync(full, "");
+      console.log(`Emptied locked file ${path.relative(root, full)}`);
+    } catch {
+      // Still locked for write as well.
+    }
+  }
+}
+
 function quarantine(target) {
   if (!fs.existsSync(target)) return;
   const backup = `${target}.old-${Date.now()}`;
@@ -32,6 +49,7 @@ function quarantine(target) {
     setTimeout(() => remove(backup), 0);
   } catch (error) {
     console.warn(`Could not quarantine ${path.relative(root, target)}: ${error.message}`);
+    truncateLockedFiles(target);
   }
 }
 
@@ -41,7 +59,11 @@ if (process.platform === "win32") {
   tryKill("electron.exe");
 }
 
-remove(path.join(root, "release"));
-if (!remove(path.join(root, "dist"))) {
-  quarantine(path.join(root, "dist"));
+for (const entry of fs.readdirSync(root)) {
+  if (entry === "dist" || entry === "release" || entry.startsWith("dist.old-") || entry.startsWith("release.old-")) {
+    const target = path.join(root, entry);
+    if (!remove(target)) {
+      quarantine(target);
+    }
+  }
 }

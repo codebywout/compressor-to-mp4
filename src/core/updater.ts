@@ -1,4 +1,4 @@
-import { BrowserWindow, app } from "electron";
+import { BrowserWindow, app, dialog } from "electron";
 import { autoUpdater, type ProgressInfo, type UpdateInfo } from "electron-updater";
 
 export type UpdateStatus =
@@ -34,7 +34,11 @@ function notesToText(notes: UpdateInfo["releaseNotes"]): string | null {
 export class AppUpdater {
   private state: UpdateState;
   private listener: UpdateListener | null = null;
+  private window: BrowserWindow | null = null;
   private started = false;
+  private prompting = false;
+  private skippedVersion: string | null = null;
+  private checkTimer: NodeJS.Timeout | null = null;
 
   constructor() {
     this.state = {
@@ -64,6 +68,7 @@ export class AppUpdater {
         message: `Versie ${info.version} is beschikbaar.`,
         releaseNotes: notesToText(info.releaseNotes)
       });
+      void this.askToUpdate(info);
     });
     autoUpdater.on("update-not-available", () => {
       this.patch({
@@ -92,6 +97,7 @@ export class AppUpdater {
         message: `Versie ${info.version} is gedownload. Herstart om te installeren.`,
         releaseNotes: notesToText(info.releaseNotes)
       });
+      void this.askToInstall(info.version);
     });
     autoUpdater.on("error", (error) => {
       this.patch({
@@ -114,20 +120,29 @@ export class AppUpdater {
   start(window: BrowserWindow): void {
     if (this.started || !app.isPackaged) return;
     this.started = true;
+    this.window = window;
     const schedule = () => {
-      setTimeout(() => {
+      setTimeout(() => { void this.check().catch(() => undefined); }, 3_000);
+      this.checkTimer = setInterval(() => {
         void this.check().catch(() => undefined);
-      }, 4_000);
+      }, 6 * 60 * 60 * 1000);
     };
     if (window.webContents.isLoading()) {
       window.webContents.once("did-finish-load", schedule);
     } else {
       schedule();
     }
+    window.on("closed", () => {
+      this.window = null;
+      if (this.checkTimer) clearInterval(this.checkTimer);
+    });
   }
 
   async check(): Promise<UpdateState> {
     if (!app.isPackaged) return this.getState();
+    if (this.state.status === "downloading" || this.state.status === "downloaded" || this.prompting) {
+      return this.getState();
+    }
     try {
       await autoUpdater.checkForUpdates();
     } catch (error) {
@@ -142,6 +157,7 @@ export class AppUpdater {
   async download(): Promise<UpdateState> {
     if (!app.isPackaged) return this.getState();
     if (this.state.status !== "available" && this.state.status !== "error") return this.getState();
+    this.skippedVersion = null;
     this.patch({ status: "downloading", percent: 0, message: "Update downloaden…" });
     try {
       await autoUpdater.downloadUpdate();
@@ -157,6 +173,63 @@ export class AppUpdater {
   install(): void {
     if (!app.isPackaged || this.state.status !== "downloaded") return;
     autoUpdater.quitAndInstall(false, true);
+  }
+
+  private async askToUpdate(info: UpdateInfo): Promise<void> {
+    if (!this.window || this.window.isDestroyed() || this.prompting) return;
+    if (this.skippedVersion === info.version) return;
+    if (this.state.status === "downloading" || this.state.status === "downloaded") return;
+
+    this.prompting = true;
+    try {
+      const notes = notesToText(info.releaseNotes);
+      const result = await dialog.showMessageBox(this.window, {
+        type: "info",
+        title: "Update beschikbaar",
+        message: `Versie ${info.version} is beschikbaar`,
+        detail: [
+          `Je gebruikt nu versie ${app.getVersion()}.`,
+          "Wil je de update downloaden en installeren?",
+          notes ? `\nWat is nieuw:\n${notes.slice(0, 800)}` : ""
+        ].filter(Boolean).join("\n"),
+        buttons: ["Later", "Nu updaten"],
+        defaultId: 1,
+        cancelId: 0,
+        noLink: true
+      });
+      if (result.response === 1) {
+        await this.download();
+      } else {
+        this.skippedVersion = info.version;
+        this.patch({
+          status: "available",
+          availableVersion: info.version,
+          message: `Versie ${info.version} is beschikbaar. Klik op het versienummer om later te updaten.`
+        });
+      }
+    } finally {
+      this.prompting = false;
+    }
+  }
+
+  private async askToInstall(version: string): Promise<void> {
+    if (!this.window || this.window.isDestroyed() || this.prompting) return;
+    this.prompting = true;
+    try {
+      const result = await dialog.showMessageBox(this.window, {
+        type: "info",
+        title: "Update klaar",
+        message: `Versie ${version} is gedownload`,
+        detail: "De app moet herstarten om de update te installeren. Doorgaan?",
+        buttons: ["Later", "Herstart en installeer"],
+        defaultId: 1,
+        cancelId: 0,
+        noLink: true
+      });
+      if (result.response === 1) this.install();
+    } finally {
+      this.prompting = false;
+    }
   }
 
   private patch(partial: Partial<UpdateState>): void {

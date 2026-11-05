@@ -24,51 +24,51 @@ npm run dist
 
 `npm run dist` maakt een schone Windows NSIS-installer in de map `release`, bijvoorbeeld `Video-Compressor-1.2.0-Setup.exe`. De installer toont het versienummer in het installatieprogramma en onder **Apps en onderdelen** als `Video Compressor 1.2.0`. Bij deïnstallatie verdwijnen programma (inclusief lokaal gedownloade FFmpeg), snelkoppelingen en registervermeldingen.
 
-De installer gebruikt het icoon uit `assets/icon.ico` / `build/icon.ico`. FFmpeg wordt niet meegebundeld; bij automatische installatie belandt het rechtstreeks in de app-map (naast `VideoCompressor.exe`, of in de projectmap tijdens ontwikkeling) als `ffmpeg/` + `ffmpeg.json`.
+De installer gebruikt het icoon uit `build/icon.ico` (bron: `assets/icon.svg`). FFmpeg wordt niet meegebundeld; bij automatische installatie belandt het rechtstreeks in de app-map (naast `VideoCompressor.exe`, of in de projectmap tijdens ontwikkeling) als `ffmpeg/` + `ffmpeg.json`.
 
 De applicatie gebruikt FFmpeg met H.264 en AAC, twee-pass encoding, `+faststart` en een veiligheidsmarge. Als een resultaat toch groter is dan de doelgrootte, wordt automatisch maximaal twee keer met een lagere videobitrate opnieuw gecodeerd. Originele bestanden worden nooit overschreven.
 
 ## GitHub Releases en automatische updates
 
-De geïnstalleerde app controleert GitHub Releases via `electron-updater`. Gebruikers zien een updatebanner of klikken op het versienummer rechtsboven.
+Je verspreidt **één** installer. Daarna publiceer je alleen nieuwe GitHub Releases; geïnstalleerde apps zoeken zelf naar updates.
 
-### Eenmalig koppelen
+Repo: [codebywout/compressor-to-mp4](https://github.com/codebywout/compressor-to-mp4)
 
-1. Maak een GitHub-repository aan en push deze code.
-2. Koppel de repo-naam:
+### Zo werkt het voor gebruikers
+
+1. Bij het starten (en elke 6 uur) controleert de app GitHub Releases.
+2. Is er een nieuwere versie, dan verschijnt een dialoog: **Later** of **Nu updaten**.
+3. Na download vraagt de app om te herstarten en installeert de update.
+4. Er is geen nieuwe installer nodig voor bestaande gebruikers.
+
+Updates werken alleen in de **geïnstalleerde** app, niet via `npm start`.
+
+### Eerste installer (eenmalig)
 
 ```powershell
-npm run sync:repo -- jouw-github-user video-compressor
+npm run dist
 ```
 
-### Nieuwe versie uitbrengen
+Verspreid `release\Video-Compressor-1.2.0-Setup.exe` (of de huidige versie). Publiceer die ook als GitHub Release (zie hieronder), zodat latere updates een startpunt hebben.
 
-**Optie A — GitHub Actions (aanbevolen)**
+### Nieuwe versie uitbrengen (geen nieuwe installer rondsturen)
 
 ```powershell
-npm run bump -- minor
-# noteer de nieuwe versie uit package.json, bv. 1.3.0
+npm run bump -- patch
 git add -A
-git commit -m "Release v1.3.0"
-git tag v1.3.0
+git commit -m "Release v1.2.1"
+git tag v1.2.1
 git push origin HEAD --tags
 ```
 
-De workflow `.github/workflows/release.yml` bouwt de Windows-installer en publiceert `Video-Compressor-x.y.z-Setup.exe`, `.blockmap` en `latest.yml` als GitHub Release.
+GitHub Actions bouwt de installer en zet `Video-Compressor-x.y.z-Setup.exe` + `latest.yml` online. Bestaande installaties vragen daarna zelf om te updaten.
 
-**Optie B — lokaal publiceren**
+Lokaal publiceren kan ook:
 
 ```powershell
-$env:GH_TOKEN = "ghp_..."   # classic token met repo-rechten
-npm run release -- minor --publish
+$env:GH_TOKEN = "ghp_..."
+npm run release -- patch --publish
 ```
-
-### Updaten bij gebruikers
-
-1. App start of gebruiker klikt op het versienummer.
-2. Bij een nieuwere release: **Download**.
-3. Daarna **Herstart en installeer**.
-4. Gebruikersdata blijft behouden; alleen de app-bestanden worden vervangen.
 
 ## Architectuur
 

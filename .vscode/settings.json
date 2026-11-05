@@ -1,0 +1,14 @@
+{
+  "files.watcherExclude": {
+    "**/dist/**": true,
+    "**/release/**": true,
+    "**/node_modules/**": true,
+    "**/ffmpeg/**": true
+  },
+  "search.exclude": {
+    "**/dist": true,
+    "**/release": true,
+    "**/node_modules": true,
+    "**/ffmpeg": true
+  }
+}
