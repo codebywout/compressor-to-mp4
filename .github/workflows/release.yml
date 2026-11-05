@@ -25,7 +25,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: npm
 
       - name: Install dependencies
@@ -49,8 +49,10 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
-          NODE_OPTIONS: "--use-system-ca"
-        run: npm run dist:publish
+        run: |
+          npm run clean
+          npm run build
+          node node_modules/electron-builder/cli.js --win nsis --publish always
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
