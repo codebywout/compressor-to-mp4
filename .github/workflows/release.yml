@@ -37,22 +37,30 @@ jobs:
         run: |
           npm run build
           node --test dist/test
-          echo "Tests finished with exit code $?"
 
       - name: Sync GitHub repository metadata
         env:
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: node scripts/sync-repository.js
 
-      - name: Build and publish installer
+      - name: Build installer
         shell: bash
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: |
           npm run clean
           npm run build
-          node node_modules/electron-builder/cli.js --win nsis --publish always
+          node node_modules/electron-builder/cli.js --win nsis --publish never
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release/Video-Compressor-*-Setup.exe
+            release/Video-Compressor-*-Setup.exe.blockmap
+            release/latest.yml
+          generate_release_notes: true
+          fail_on_unmatched_files: true
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
