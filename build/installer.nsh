@@ -3,6 +3,9 @@
 ; Electron-caches in AppData worden hier extra opgeruimd.
 
 !macro customUnInstall
+  ; Alleen bij echte uninstall: AppData opruimen.
+  ; Bij auto-update (${isUpdated}) GEEN snelkoppelingen of data wissen —
+  ; anders verdwijnt de app uit het Startmenu na een update.
   ${ifNot} ${isUpdated}
     SetShellVarContext current
     RMDir /r "$APPDATA\${APP_PACKAGE_NAME}"
@@ -18,8 +21,7 @@
     ; Oude locatie uit eerdere builds (AppData\VideoCompressor).
     RMDir /r "$APPDATA\VideoCompressor"
     RMDir /r "$LOCALAPPDATA\VideoCompressor"
+    Delete "$DESKTOP\Video Compressor.lnk"
+    Delete "$SMPROGRAMS\Video Compressor.lnk"
   ${endIf}
-
-  Delete "$DESKTOP\Video Compressor.lnk"
-  Delete "$SMPROGRAMS\Video Compressor.lnk"
 !macroend
