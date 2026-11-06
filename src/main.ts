@@ -1,5 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme, shell } from "electron";
-import { statSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
 import { BatchManager } from "./core/batch-manager";
 import { probeFile } from "./core/probe";
@@ -14,6 +14,7 @@ function windowBackground(): string {
 }
 
 const APP_USER_MODEL_ID = "com.video-compressor.desktop";
+const SHORTCUT_NAME = "Video Compressor.lnk";
 
 if (process.platform === "win32") {
   app.setAppUserModelId(APP_USER_MODEL_ID);
@@ -22,6 +23,38 @@ if (process.platform === "win32") {
 /** Installatiemap (naast de .exe) of de projectmap tijdens ontwikkeling. */
 function appDirectory(): string {
   return app.isPackaged ? dirname(app.getPath("exe")) : process.cwd();
+}
+
+/**
+ * Stille NSIS-updates laten Startmenu-/bureaubladsnelkoppelingen soms weg.
+ * Herstel ze bij elke start van de geïnstalleerde app.
+ */
+function ensureWindowsShortcuts(): void {
+  if (process.platform !== "win32" || !app.isPackaged) return;
+  const exePath = app.getPath("exe");
+  const options = {
+    target: exePath,
+    cwd: dirname(exePath),
+    description: "Video Compressor",
+    icon: exePath,
+    iconIndex: 0,
+    appUserModelId: APP_USER_MODEL_ID
+  };
+  const shortcuts = [
+    join(app.getPath("appData"), "Microsoft", "Windows", "Start Menu", "Programs", SHORTCUT_NAME),
+    join(app.getPath("desktop"), SHORTCUT_NAME)
+  ];
+  for (const shortcutPath of shortcuts) {
+    try {
+      if (existsSync(shortcutPath)) {
+        shell.writeShortcutLink(shortcutPath, "update", options);
+      } else {
+        shell.writeShortcutLink(shortcutPath, "create", options);
+      }
+    } catch (error) {
+      console.warn(`[Shortcuts] Kon snelkoppeling niet schrijven: ${shortcutPath}`, error);
+    }
+  }
 }
 
 let activeBatch: BatchManager | null = null;
@@ -64,6 +97,7 @@ function createWindow(): BrowserWindow {
 }
 
 app.whenReady().then(() => {
+  ensureWindowsShortcuts();
   const window = createWindow();
   const provider = new FfmpegProvider(join(process.resourcesPath, "ffmpeg"), appDirectory());
   const updater = new AppUpdater();
