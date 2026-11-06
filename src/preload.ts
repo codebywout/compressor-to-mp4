@@ -1,10 +1,13 @@
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, webUtils } from "electron";
 import { BatchItem, BatchUpdate, VideoMetadata } from "./shared/types";
 import type { FfmpegStatus } from "./core/ffmpeg-provider";
 import type { UpdateState } from "./core/updater";
 
 contextBridge.exposeInMainWorld("videoCompressor", {
-  getAppInfo: (): Promise<{ name: string; version: string; packaged: boolean; userData: string; appDirectory: string }> => ipcRenderer.invoke("app-info"),
+  getAppInfo: (): Promise<{ name: string; version: string; packaged: boolean; userData: string; appDirectory: string; electron: string }> => ipcRenderer.invoke("app-info"),
+  getPathForFile: (file: File): string => webUtils.getPathForFile(file),
+  setThemeSource: (source: "system" | "light" | "dark"): Promise<"system" | "light" | "dark"> => ipcRenderer.invoke("set-theme-source", source),
+  getThemeSource: (): Promise<"system" | "light" | "dark"> => ipcRenderer.invoke("get-theme-source"),
   getUpdateStatus: (): Promise<UpdateState> => ipcRenderer.invoke("update-status"),
   checkForUpdates: (): Promise<UpdateState> => ipcRenderer.invoke("update-check"),
   downloadUpdate: (): Promise<UpdateState> => ipcRenderer.invoke("update-download"),

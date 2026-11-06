@@ -43,3 +43,38 @@ test("batch does not rerun items that already failed", async () => {
 test("batch rejects invalid parallelism", () => {
   assert.throws(() => new BatchManager("ffmpeg", 0), /Paralleliteit/);
 });
+
+test("cancelAll marks remaining queued items as cancelled", async () => {
+  const manager = new BatchManager("missing-ffmpeg-for-test", 1);
+  const items = [item("a"), item("b"), item("c")];
+  const promise = manager.start(items, () => {
+    manager.cancelAll();
+  });
+  const result = await promise;
+  assert.ok(result.every((candidate) => candidate.status === "failed" || candidate.status === "cancelled"));
+  assert.ok(result.some((candidate) => candidate.status === "cancelled" || candidate.status === "failed"));
+});
+
+test("cancelItem cancels a queued item without stopping others", async () => {
+  const manager = new BatchManager("missing-ffmpeg-for-test", 1);
+  let cancelledQueued = false;
+  const result = await manager.start([item("keep"), item("drop")], (update) => {
+    if (!cancelledQueued && update.item.id === "keep" && update.item.status === "running") {
+      manager.cancelItem("drop");
+      cancelledQueued = true;
+    }
+  });
+  const dropped = result.find((candidate) => candidate.id === "drop");
+  assert.equal(dropped?.status, "cancelled");
+  assert.equal(result.find((candidate) => candidate.id === "keep")?.status, "failed");
+});
+
+test("partial batch failure keeps independent statuses", async () => {
+  const manager = new BatchManager("missing-ffmpeg-for-test", 2);
+  const failed = item("prefailed");
+  failed.status = "failed";
+  failed.error = "voorbereiding mislukt";
+  const result = await manager.start([failed, item("a"), item("b")], () => undefined);
+  assert.equal(result.find((candidate) => candidate.id === "prefailed")?.status, "failed");
+  assert.equal(result.filter((candidate) => candidate.status === "failed").length, 3);
+});

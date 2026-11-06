@@ -3,230 +3,342 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:; connect-src 'self'">
   <title>Video Compressor</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Syne:wght@600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 </head>
-<body spellcheck="false">
-  <div class="app-glow" aria-hidden="true"></div>
-
-  <header>
-    <div class="shell header-inner">
-      <div class="brand">
-        <span class="logo" aria-hidden="true">
-          <svg viewBox="0 0 32 32" width="20" height="20" fill="none">
-            <rect x="3" y="7" width="18" height="18" rx="3" stroke="currentColor" stroke-width="2"/>
-            <path d="M21 13h5l3 3v6l-3 3h-5" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
-            <path d="M8 13h8M8 18h5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-          </svg>
+<body data-theme="system" spellcheck="false">
+  <div class="app">
+    <nav class="sidebar" aria-label="Hoofdnavigatie">
+      <div class="sidebar-brand">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 20 20" width="16" height="16" fill="none"><rect x="2" y="4" width="11" height="12" rx="2" stroke="currentColor" stroke-width="1.6"/><path d="M13 7.5h3.5L18 9.5v5L16.5 16H13" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M5 8h5M5 11h3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
         </span>
         <div>
-          <p class="brand-kicker">Desktop tool</p>
-          <h1>Video Compressor</h1>
+          <strong>Video Compressor</strong>
+          <span>Windows</span>
         </div>
       </div>
-      <div class="header-meta">
-        <button id="check-updates" class="version-pill version-button" type="button" title="Controleer op updates">v…</button>
-        <div id="binary-status" class="pill wait">FFmpeg controleren</div>
-      </div>
-    </div>
-  </header>
 
-  <main class="shell">
-    <section id="update-panel" class="banner update-banner hidden" data-status="idle">
-      <div class="banner-top">
-        <div>
-          <h2>Update beschikbaar</h2>
-          <p id="update-status">Nog niet gecontroleerd.</p>
-        </div>
-        <div class="button-row update-actions">
-          <button id="update-check" class="secondary" type="button">Opnieuw controleren</button>
-          <button id="update-download" class="primary hidden" type="button">Nu updaten</button>
-          <button id="update-install" class="primary hidden" type="button">Herstart en installeer</button>
-          <button id="update-later" class="secondary hidden" type="button">Later</button>
-        </div>
+      <div class="nav-list" role="tablist" aria-orientation="vertical">
+        <button type="button" class="nav-item active" data-page="converter" role="tab" aria-selected="true">
+          <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><path d="M4 5h12v3H4zm0 5h8v3H4zm0 5h10v2H4z" fill="currentColor"/></svg>
+          Converter
+        </button>
+        <button type="button" class="nav-item" data-page="history" role="tab" aria-selected="false">
+          <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><path d="M10 3a7 7 0 1 0 6.3 4H14a5 5 0 1 1-4-2.6V7l4-2.5L10 2v1z" fill="currentColor"/></svg>
+          Geschiedenis
+        </button>
+        <button type="button" class="nav-item" data-page="settings" role="tab" aria-selected="false">
+          <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><path d="M8.2 2.5h3.6l.4 2.1 1.8.9 2-1 1.8 1.8-1 2 .9 1.8 2.1.4v3.6l-2.1.4-.9 1.8 1 2-1.8 1.8-2-1-1.8.9-.4 2.1H8.2l-.4-2.1-1.8-.9-2 1-1.8-1.8 1-2-.9-1.8L.2 11.8V8.2l2.1-.4.9-1.8-1-2L4 2.6l2 1 1.8-.9.4-2.2zM10 13a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" fill="currentColor"/></svg>
+          Instellingen
+        </button>
+        <button type="button" class="nav-item" data-page="about" role="tab" aria-selected="false">
+          <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><path d="M10 2a8 8 0 1 1 0 16 8 8 0 0 1 0-16zm0 6.5a1 1 0 1 0 0-2 1 1 0 0 0 0 2zM9 10h2v5H9z" fill="currentColor"/></svg>
+          Over
+        </button>
       </div>
-      <div id="update-progress-wrap" class="install-help hidden">
-        <div class="progress-track"><div id="update-progress"></div></div>
-      </div>
-      <p id="update-notes" class="hint hidden"></p>
-    </section>
 
-    <section id="ffmpeg-panel" class="banner is-wait">
-      <div class="banner-top">
-        <div>
-          <h2>FFmpeg</h2>
-          <p id="ffmpeg-status">Bezig met zoeken en valideren…</p>
-        </div>
+      <div class="sidebar-foot">
+        <div class="meta-chip" id="sidebar-version">v…</div>
+        <div class="meta-chip" id="sidebar-ffmpeg" data-state="wait">FFmpeg…</div>
       </div>
-      <details id="ffmpeg-details">
-        <summary>Installatie en codecs</summary>
-        <p class="location-line">Locatie: <span id="ffmpeg-location">—</span></p>
-        <p id="ffmpeg-codecs" class="hint">Codecs worden gecontroleerd…</p>
-        <div class="button-row">
-          <button id="ffmpeg-recheck" class="secondary" type="button">Opnieuw controleren</button>
-          <button id="ffmpeg-select" class="secondary" type="button">Installatie kiezen</button>
-          <button id="ffmpeg-install-button" class="primary" type="button">Automatisch installeren</button>
-        </div>
-        <div id="ffmpeg-install" class="install-help hidden">
-          <p>Download zonder administratorrechten. Het Windows-PATH wordt niet gewijzigd.</p>
-          <div class="progress-track"><div id="ffmpeg-install-progress"></div></div>
-        </div>
-      </details>
-    </section>
+    </nav>
 
     <div class="workspace">
-      <section class="queue-column">
-        <section id="drop-zone" class="drop-zone">
-          <div class="upload-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M12 16V5"/><path d="M8 9l4-4 4 4"/><path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>
-            </svg>
-          </div>
-          <div class="drop-copy">
-            <h2>
-              <span class="drop-empty">Sleep video's hierheen</span>
-              <span class="drop-more">Meer video's toevoegen</span>
-            </h2>
-            <p class="drop-empty">of kies ze op je computer. Je kunt blijven toevoegen.</p>
-          </div>
-          <button id="select-button" class="primary" type="button">Bestanden selecteren</button>
-          <small>TS · M2TS · MP4 · MOV · MKV · AVI</small>
-        </section>
-
-        <section id="files-section" class="panel hidden">
-          <div class="section-title">
-            <div>
-              <h2>Wachtrij</h2>
-              <p id="file-count" class="hint"></p>
-            </div>
-            <div class="filters" id="queue-filters">
-              <button type="button" data-filter="all" aria-pressed="true">Alles</button>
-              <button type="button" data-filter="active" aria-pressed="false">Actief</button>
-              <button type="button" data-filter="done" aria-pressed="false">Klaar</button>
-              <button type="button" data-filter="problem" aria-pressed="false">Probleem</button>
-            </div>
-          </div>
-          <div class="queue-tools">
-            <button id="retry-failed" class="text-button" type="button">Mislukte opnieuw</button>
-            <button id="clear-completed" class="text-button" type="button">Voltooide wissen</button>
-            <button id="clear-button" class="text-button danger" type="button">Niet-actieve wissen</button>
-          </div>
-          <div id="file-list" class="file-list"></div>
-          <p id="filter-empty" class="hint hidden">Geen bestanden in deze weergave.</p>
-        </section>
-      </section>
-
-      <aside class="side-column">
-        <section id="settings-section" class="panel">
-          <div class="section-title">
-            <h2>Instellingen</h2>
-          </div>
-          <div class="mode-grid" role="radiogroup" aria-label="Verwerkingsmodus">
-            <label class="mode-card">
-              <input type="radio" name="processing-mode" value="compress" checked>
-              <span><strong>Comprimeren</strong><small>Maximale bestandsgrootte</small></span>
-            </label>
-            <label class="mode-card">
-              <input type="radio" name="processing-mode" value="convert">
-              <span><strong>Converteren</strong><small>Alleen naar MP4</small></span>
-            </label>
-          </div>
-
-          <div class="settings-grid">
-            <label id="target-mb-field" class="wide-field">Globale doelgrootte (MB)
-              <input id="target-mb" type="number" min="1" step="1" value="50" inputmode="numeric">
-            </label>
-            <label id="audio-field">Audio (kbps)
-              <select id="audio-bitrate"><option>96</option><option selected>128</option><option>160</option><option>192</option></select>
-            </label>
-            <label id="codec-field">Videocodec
-              <select id="video-codec"><option value="h264" selected>H.264</option><option value="h265">H.265</option></select>
-            </label>
-            <label id="preset-field">Preset
-              <select id="preset"><option>ultrafast</option><option>fast</option><option selected>medium</option><option>slow</option></select>
-            </label>
-            <label id="concurrency-field">Tegelijk
-              <input id="concurrency" type="number" min="1" max="8" step="1" value="1" inputmode="numeric">
-            </label>
-          </div>
-          <p id="convert-note" class="hint hidden">Eerst worden de streams gekopieerd. Lukt dat niet, dan volgt H.264/AAC met deze preset en audiobitrate.</p>
-
-          <div id="advanced-toggle" class="advanced-row">
-            <label class="switch"><input id="advanced" type="checkbox"><span class="switch-ui" aria-hidden="true"></span>Geavanceerd</label>
-          </div>
-          <div id="advanced-options" class="settings-grid hidden">
-            <label>Resolutie
-              <select id="resolution"><option value="original">Origineel</option><option>1080p</option><option>720p</option><option>480p</option></select>
-            </label>
-            <label>Framerate
-              <select id="framerate"><option value="original">Origineel</option><option>24</option><option>25</option><option>30</option><option>60</option></select>
-            </label>
-            <label class="switch wide-field"><input id="keep-audio" type="checkbox" checked><span class="switch-ui" aria-hidden="true"></span>Audio behouden</label>
-          </div>
-
-          <p class="hint">De MP4 komt naast het bronbestand. Start gebruikt deze instellingen; een doelgrootte op een kaart geldt alleen voor dat bestand.</p>
-          <button id="reset-targets" class="secondary wide" type="button">Afwijkende doelgroottes wissen</button>
-        </section>
-      </aside>
-    </div>
-  </main>
-
-  <footer class="action-bar">
-    <div class="shell action-inner">
-      <div class="action-progress">
-        <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Batchvoortgang">
-          <div id="batch-progress-bar"></div>
+      <header class="topbar">
+        <div>
+          <h1 id="page-title">Converter</h1>
+          <p id="page-subtitle">Comprimeer of converteer video’s naar MP4</p>
         </div>
-        <p id="batch-summary">Voeg bestanden toe om te beginnen.</p>
-        <p id="start-hint" class="hint"></p>
-      </div>
-      <div class="action-buttons">
-        <button id="cancel-button" class="secondary danger-btn hidden" type="button">Annuleer batch</button>
-        <button id="compress-button" class="primary" type="button">Start compressie</button>
-      </div>
+        <div class="topbar-actions">
+          <button type="button" id="check-updates" class="btn subtle" title="Controleer op updates">Updates</button>
+        </div>
+      </header>
+
+      <main class="content">
+        <!-- CONVERTER -->
+        <section id="page-converter" class="page active" data-page-panel="converter">
+          <div id="update-panel" class="banner hidden" data-status="idle">
+            <div class="banner-body">
+              <div>
+                <h2>Update</h2>
+                <p id="update-status">Nog niet gecontroleerd.</p>
+              </div>
+              <div class="btn-row">
+                <button id="update-check" class="btn secondary" type="button">Opnieuw controleren</button>
+                <button id="update-download" class="btn primary hidden" type="button">Nu updaten</button>
+                <button id="update-install" class="btn primary hidden" type="button">Herstart en installeer</button>
+                <button id="update-later" class="btn secondary hidden" type="button">Later</button>
+              </div>
+            </div>
+            <div id="update-progress-wrap" class="hidden">
+              <div class="progress"><div id="update-progress"></div></div>
+            </div>
+            <p id="update-notes" class="muted hidden"></p>
+          </div>
+
+          <div class="converter-layout">
+            <section class="queue-pane panel">
+              <div id="drop-zone" class="drop-zone">
+                <div class="drop-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V5"/><path d="M8 9l4-4 4 4"/><path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
+                </div>
+                <div class="drop-copy">
+                  <h2>
+                    <span class="drop-empty">Sleep video’s hierheen</span>
+                    <span class="drop-more">Meer video’s toevoegen</span>
+                  </h2>
+                  <p class="drop-empty muted">of kies bestanden op je computer</p>
+                </div>
+                <button id="select-button" class="btn primary" type="button">Bestanden selecteren</button>
+                <small class="muted">TS · M2TS · MP4 · MOV · MKV · AVI</small>
+              </div>
+
+              <div id="files-section" class="queue-block hidden">
+                <div class="section-bar">
+                  <div>
+                    <h2>Wachtrij</h2>
+                    <p id="file-count" class="muted"></p>
+                  </div>
+                  <div class="filters" id="queue-filters">
+                    <button type="button" data-filter="all" aria-pressed="true">Alles</button>
+                    <button type="button" data-filter="active" aria-pressed="false">Actief</button>
+                    <button type="button" data-filter="done" aria-pressed="false">Klaar</button>
+                    <button type="button" data-filter="problem" aria-pressed="false">Probleem</button>
+                  </div>
+                </div>
+                <div class="queue-tools">
+                  <button id="retry-failed" class="btn text" type="button">Mislukte opnieuw</button>
+                  <button id="clear-completed" class="btn text" type="button">Voltooide wissen</button>
+                  <button id="clear-button" class="btn text danger" type="button">Niet-actieve wissen</button>
+                </div>
+                <div class="table-wrap">
+                  <table class="file-table" aria-label="Wachtrij">
+                    <thead>
+                      <tr>
+                        <th>Bestand</th>
+                        <th>Resolutie</th>
+                        <th>Origineel</th>
+                        <th>Doel</th>
+                        <th>Status</th>
+                        <th>Voortgang</th>
+                        <th>Resultaat</th>
+                        <th>Besparing</th>
+                        <th></th>
+                      </tr>
+                    </thead>
+                    <tbody id="file-list"></tbody>
+                  </table>
+                </div>
+                <p id="filter-empty" class="muted empty-hint hidden">Geen bestanden in deze weergave.</p>
+              </div>
+            </section>
+
+            <aside class="side-pane">
+              <section class="panel" id="settings-section">
+                <div class="section-bar">
+                  <h2>Verwerking</h2>
+                </div>
+                <div class="mode-grid" role="radiogroup" aria-label="Verwerkingsmodus">
+                  <label class="mode-card">
+                    <input type="radio" name="processing-mode" value="compress" checked>
+                    <span><strong>Comprimeren</strong><small>Maximale bestandsgrootte</small></span>
+                  </label>
+                  <label class="mode-card">
+                    <input type="radio" name="processing-mode" value="convert">
+                    <span><strong>Converteren</strong><small>Alleen naar MP4</small></span>
+                  </label>
+                </div>
+
+                <div class="form-grid">
+                  <label id="target-mb-field" class="span-2">Doelgrootte (MB)
+                    <input id="target-mb" type="number" min="1" step="1" value="50" inputmode="numeric">
+                  </label>
+                  <label id="audio-field">Audio (kbps)
+                    <select id="audio-bitrate"><option>96</option><option selected>128</option><option>160</option><option>192</option></select>
+                  </label>
+                  <label id="codec-field">Videocodec
+                    <select id="video-codec"><option value="h264" selected>H.264</option><option value="h265">H.265</option></select>
+                  </label>
+                  <label id="preset-field">Preset
+                    <select id="preset"><option>ultrafast</option><option>fast</option><option selected>medium</option><option>slow</option></select>
+                  </label>
+                  <label id="concurrency-field">Tegelijk
+                    <input id="concurrency" type="number" min="1" max="8" step="1" value="1" inputmode="numeric">
+                  </label>
+                </div>
+                <p id="convert-note" class="muted hidden">Eerst stream copy; bij mislukken volgt H.264/AAC.</p>
+
+                <details id="advanced-toggle" class="advanced">
+                  <summary>Geavanceerd</summary>
+                  <div id="advanced-options" class="form-grid">
+                    <label>Resolutie
+                      <select id="resolution"><option value="original">Origineel</option><option>1080p</option><option>720p</option><option>480p</option></select>
+                    </label>
+                    <label>Framerate
+                      <select id="framerate"><option value="original">Origineel</option><option>24</option><option>25</option><option>30</option><option>60</option></select>
+                    </label>
+                    <label class="check span-2"><input id="keep-audio" type="checkbox" checked><span>Audio behouden</span></label>
+                  </div>
+                </details>
+
+                <p class="muted">MP4 komt naast het bronbestand. Een doelgrootte op een rij geldt alleen voor dat bestand.</p>
+                <button id="reset-targets" class="btn secondary wide" type="button">Afwijkende doelgroottes wissen</button>
+              </section>
+
+              <section class="panel detail-panel" id="detail-panel">
+                <div class="section-bar"><h2>Details</h2></div>
+                <p id="detail-empty" class="muted">Selecteer een bestand in de wachtrij.</p>
+                <dl id="detail-body" class="detail-list hidden"></dl>
+              </section>
+            </aside>
+          </div>
+        </section>
+
+        <!-- HISTORY -->
+        <section id="page-history" class="page" data-page-panel="history" hidden>
+          <div class="panel">
+            <div class="section-bar">
+              <div>
+                <h2>Geschiedenis</h2>
+                <p class="muted">Voltooide en mislukte jobs van deze installatie. Gescheiden van de actieve wachtrij.</p>
+              </div>
+              <button id="history-clear" class="btn secondary" type="button">Geschiedenis legen</button>
+            </div>
+            <div class="table-wrap">
+              <table class="file-table" aria-label="Geschiedenis">
+                <thead>
+                  <tr>
+                    <th>Bestand</th>
+                    <th>Datum</th>
+                    <th>Origineel</th>
+                    <th>Resultaat</th>
+                    <th>Besparing</th>
+                    <th>Status</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="history-list"></tbody>
+              </table>
+            </div>
+            <p id="history-empty" class="muted empty-hint">Nog geen geschiedenis.</p>
+          </div>
+        </section>
+
+        <!-- SETTINGS -->
+        <section id="page-settings" class="page" data-page-panel="settings" hidden>
+          <div class="settings-stack">
+            <section class="panel">
+              <h2>Uiterlijk</h2>
+              <div class="theme-grid" role="radiogroup" aria-label="Thema">
+                <label class="choice-card"><input type="radio" name="theme" value="system" checked><span><strong>Windows</strong><small>Systeemthema volgen</small></span></label>
+                <label class="choice-card"><input type="radio" name="theme" value="light"><span><strong>Licht</strong><small>Altijd licht</small></span></label>
+                <label class="choice-card"><input type="radio" name="theme" value="dark"><span><strong>Donker</strong><small>Altijd donker</small></span></label>
+              </div>
+            </section>
+
+            <section class="panel">
+              <h2>Standaardwaarden</h2>
+              <p class="muted">Deze waarden worden ook op de Converterpagina gebruikt en persistent opgeslagen.</p>
+              <div class="form-grid settings-defaults">
+                <label>Doelgrootte (MB)<input id="settings-target-mb" type="number" min="1" step="1" value="50"></label>
+                <label>Audio (kbps)<select id="settings-audio"><option>96</option><option selected>128</option><option>160</option><option>192</option></select></label>
+                <label>Videocodec<select id="settings-codec"><option value="h264" selected>H.264</option><option value="h265">H.265</option></select></label>
+                <label>Preset<select id="settings-preset"><option>ultrafast</option><option>fast</option><option selected>medium</option><option>slow</option></select></label>
+                <label>Paralleliteit<input id="settings-concurrency" type="number" min="1" max="8" step="1" value="1"></label>
+                <label>Resolutie<select id="settings-resolution"><option value="original">Origineel</option><option>1080p</option><option>720p</option><option>480p</option></select></label>
+                <label>Framerate<select id="settings-framerate"><option value="original">Origineel</option><option>24</option><option>25</option><option>30</option><option>60</option></select></label>
+                <label class="check"><input id="settings-keep-audio" type="checkbox" checked><span>Audio behouden</span></label>
+              </div>
+            </section>
+
+            <section class="panel" id="ffmpeg-panel">
+              <h2>FFmpeg</h2>
+              <p id="ffmpeg-status" class="status-line">Bezig met zoeken…</p>
+              <p class="muted">Locatie: <span id="ffmpeg-location">—</span></p>
+              <p id="ffmpeg-codecs" class="muted">Codecs worden gecontroleerd…</p>
+              <div class="btn-row">
+                <button id="ffmpeg-recheck" class="btn secondary" type="button">Opnieuw controleren</button>
+                <button id="ffmpeg-select" class="btn secondary" type="button">Installatie kiezen</button>
+                <button id="ffmpeg-install-button" class="btn primary" type="button">Automatisch installeren</button>
+              </div>
+              <div id="ffmpeg-install" class="hidden">
+                <p class="muted">Download zonder administratorrechten. PATH wordt niet gewijzigd.</p>
+                <div class="progress"><div id="ffmpeg-install-progress"></div></div>
+              </div>
+            </section>
+
+            <section class="panel">
+              <h2>Updates</h2>
+              <p id="settings-update-status" class="status-line">Nog niet gecontroleerd.</p>
+              <div class="btn-row">
+                <button id="settings-update-check" class="btn secondary" type="button">Controleer op updates</button>
+                <button id="settings-update-download" class="btn primary hidden" type="button">Nu updaten</button>
+                <button id="settings-update-install" class="btn primary hidden" type="button">Herstart en installeer</button>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <!-- ABOUT -->
+        <section id="page-about" class="page" data-page-panel="about" hidden>
+          <div class="panel about-panel">
+            <h2>Over Video Compressor</h2>
+            <dl class="detail-list" id="about-list"></dl>
+            <div class="btn-row">
+              <button id="about-copy" class="btn secondary" type="button">Diagnostiek kopiëren</button>
+              <a id="about-github" class="btn secondary" href="https://github.com/codebywout/compressor-to-mp4" target="_blank" rel="noreferrer">GitHub</a>
+              <a id="about-releases" class="btn secondary" href="https://github.com/codebywout/compressor-to-mp4/releases" target="_blank" rel="noreferrer">Releases</a>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <footer class="action-bar" id="converter-action-bar">
+        <div class="action-progress">
+          <div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Batchvoortgang">
+            <div id="batch-progress-bar"></div>
+          </div>
+          <p id="batch-summary">Voeg bestanden toe om te beginnen.</p>
+          <p id="start-hint" class="muted"></p>
+        </div>
+        <div class="btn-row">
+          <button id="cancel-button" class="btn secondary danger hidden" type="button">Annuleer batch</button>
+          <button id="compress-button" class="btn primary" type="button">Start compressie</button>
+        </div>
+      </footer>
     </div>
-  </footer>
+  </div>
 
   <div id="toasts" class="toasts" aria-live="polite"></div>
 
-  <template id="file-card-template">
-    <article class="file-card">
-      <div class="file-head">
-        <div class="file-mark" aria-hidden="true"></div>
-        <div class="file-id">
-          <h3 class="file-name"></h3>
-          <p class="file-meta"></p>
+  <template id="file-row-template">
+    <tr class="file-row" tabindex="0">
+      <td class="col-name"><span class="file-name"></span><span class="file-note muted"></span></td>
+      <td class="col-res"></td>
+      <td class="col-size"></td>
+      <td class="col-target"><input class="item-target" type="number" min="1" step="1" inputmode="numeric" title="Doelgrootte (MB)"><em class="override-tag hidden">eigen</em></td>
+      <td class="col-status"><span class="status-chip"></span></td>
+      <td class="col-progress">
+        <div class="progress mini"><div class="progress-fill"></div></div>
+        <span class="progress-percent muted"></span>
+      </td>
+      <td class="col-result"></td>
+      <td class="col-saving"></td>
+      <td class="col-actions">
+        <div class="row-actions">
+          <button type="button" class="btn icon" data-action="cancel" title="Annuleren" aria-label="Annuleren"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><rect x="3" y="3" width="10" height="10" rx="1.5" fill="currentColor"/></svg></button>
+          <button type="button" class="btn icon" data-action="retry" title="Opnieuw" aria-label="Opnieuw"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M8 2a6 6 0 1 0 5.3 3.2H11A4 4 0 1 1 8 4v2l3.5-2L8 0v2z" fill="currentColor"/></svg></button>
+          <button type="button" class="btn icon" data-action="open" title="Afspelen" aria-label="Afspelen"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 2.5v11l10-5.5L4 2.5z" fill="currentColor"/></svg></button>
+          <button type="button" class="btn icon" data-action="reveal" title="In map" aria-label="In map"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M2 3.5h5l1.5 1.5H14v8H2v-9.5z" fill="currentColor"/></svg></button>
+          <button type="button" class="btn icon" data-action="save" title="Opslaan als" aria-label="Opslaan als"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M3 2h8l2 2v10H3V2zm2 0v4h6V2H5zm1 7a2 2 0 1 0 0 4 2 2 0 0 0 0-4z" fill="currentColor"/></svg></button>
+          <button type="button" class="btn icon danger" data-action="remove" title="Verwijderen" aria-label="Verwijderen"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4.2 3.5 3.5 4.2 7.3 8l-3.8 3.8.7.7L8 8.7l3.8 3.8.7-.7L8.7 8l3.8-3.8-.7-.7L8 7.3 4.2 3.5z" fill="currentColor"/></svg></button>
         </div>
-        <span class="status-chip"></span>
-      </div>
-      <div class="file-progress">
-        <div class="progress-track" aria-hidden="true"><div class="progress-fill"></div></div>
-        <div class="progress-meta">
-          <span class="progress-percent"></span>
-          <span class="progress-detail"></span>
-        </div>
-      </div>
-      <div class="file-metrics">
-        <div><span>Origineel</span><strong class="metric-size"></strong></div>
-        <div><span>Duur</span><strong class="metric-duration"></strong></div>
-        <label class="metric-target"><span>Doel (MB) <em class="override-tag hidden">eigen</em></span><input class="item-target" type="number" min="1" step="1" inputmode="numeric"></label>
-        <div><span>Resultaat</span><strong class="metric-result"></strong></div>
-        <div><span>Besparing</span><strong class="metric-saving"></strong></div>
-      </div>
-      <p class="file-note"></p>
-      <div class="file-actions">
-        <button type="button" class="secondary" data-action="cancel">Annuleren</button>
-        <button type="button" class="secondary" data-action="retry">Opnieuw</button>
-        <button type="button" class="secondary" data-action="open">Afspelen</button>
-        <button type="button" class="secondary" data-action="reveal">In map</button>
-        <button type="button" class="secondary" data-action="save">Opslaan als</button>
-        <button type="button" class="text-button danger" data-action="remove">Verwijderen</button>
-      </div>
-    </article>
+      </td>
+    </tr>
   </template>
+
   <script src="../renderer.js"></script>
 </body>
 </html>

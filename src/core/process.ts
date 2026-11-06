@@ -3,10 +3,11 @@ import { EventEmitter } from "node:events";
 
 export class ManagedProcess extends EventEmitter {
   private child: ChildProcessWithoutNullStreams;
+  private cancelled = false;
 
   constructor(command: string, args: string[]) {
     super();
-    this.child = spawn(command, args, { windowsHide: true });
+    this.child = spawn(command, args, { windowsHide: true, shell: false });
     this.child.stderr.on("data", (chunk: Buffer) => this.emit("stderr", chunk.toString()));
     this.child.stdout.on("data", (chunk: Buffer) => this.emit("stdout", chunk.toString()));
     this.child.on("error", (error) => this.emit("error", error));
@@ -14,7 +15,14 @@ export class ManagedProcess extends EventEmitter {
   }
 
   cancel(): void {
-    if (!this.child.killed) this.child.kill();
+    if (this.cancelled) return;
+    this.cancelled = true;
+    const pid = this.child.pid;
+    if (process.platform === "win32" && pid) {
+      spawn("taskkill", ["/pid", String(pid), "/T", "/F"], { windowsHide: true, shell: false, stdio: "ignore" });
+      return;
+    }
+    if (!this.child.killed) this.child.kill("SIGTERM");
   }
 }
 

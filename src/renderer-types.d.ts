@@ -7,7 +7,10 @@ export {};
 declare global {
   interface Window {
     videoCompressor: {
-      getAppInfo(): Promise<{ name: string; version: string; packaged: boolean; userData: string; appDirectory: string }>;
+      getAppInfo(): Promise<{ name: string; version: string; packaged: boolean; userData: string; appDirectory: string; electron: string }>;
+      getPathForFile(file: File): string;
+      setThemeSource(source: "system" | "light" | "dark"): Promise<"system" | "light" | "dark">;
+      getThemeSource(): Promise<"system" | "light" | "dark">;
       getUpdateStatus(): Promise<UpdateState>;
       checkForUpdates(): Promise<UpdateState>;
       downloadUpdate(): Promise<UpdateState>;

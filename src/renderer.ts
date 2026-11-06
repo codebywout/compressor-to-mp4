@@ -6,6 +6,8 @@ type UpdateState = import("./core/updater").UpdateState;
 
 type QueueFilter = "all" | "active" | "done" | "problem";
 type ToastTone = "info" | "ok" | "error";
+type PageId = "converter" | "history" | "settings" | "about";
+type ThemePreference = "system" | "light" | "dark";
 
 interface Preferences {
   mode?: "compress" | "convert";
@@ -18,22 +20,48 @@ interface Preferences {
   frameRate?: string;
   keepAudio?: boolean;
   advanced?: boolean;
+  theme?: ThemePreference;
+}
+
+interface HistoryEntry {
+  id: string;
+  inputPath: string;
+  outputPath: string | null;
+  finishedAt: string;
+  originalBytes: number;
+  outputBytes: number | null;
+  status: "completed" | "failed" | "cancelled";
+  error?: string;
+  durationSeconds: number | null;
 }
 
 const STORAGE_KEY = "video-compressor.preferences.v1";
+const HISTORY_KEY = "video-compressor.history.v1";
 const STATUS_LABEL = { queued: "Wachtend", running: "Bezig", completed: "Voltooid", failed: "Fout", cancelled: "Geannuleerd" } as const;
+const PAGE_COPY: Record<PageId, { title: string; subtitle: string }> = {
+  converter: { title: "Converter", subtitle: "Comprimeer of converteer video’s naar MP4" },
+  history: { title: "Geschiedenis", subtitle: "Eerdere resultaten, gescheiden van de actieve wachtrij" },
+  settings: { title: "Instellingen", subtitle: "Uiterlijk, standaardwaarden, FFmpeg en updates" },
+  about: { title: "Over", subtitle: "Versie- en diagnose-informatie" }
+};
 
 const items = new Map<string, BatchItem>();
 const dismissed = new Set<string>();
+const historyEntries: HistoryEntry[] = [];
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
 let batchRunning = false;
 let queueFilter: QueueFilter = "all";
 let ffmpegReady = false;
 let ffmpegState: FfmpegStatus["state"] = "checking";
+let ffmpegStatusCache: FfmpegStatus | null = null;
 let installing = false;
 let reprobeRunning = false;
 let summaryKey = "";
+let selectedId: string | null = null;
+let currentPage: PageId = "converter";
+let appInfo: { name: string; version: string; packaged: boolean; userData: string; appDirectory: string; electron: string } | null = null;
+let latestUpdate: UpdateState | null = null;
 
 function getApi(): Window["videoCompressor"] {
   if (!window.videoCompressor) throw new Error("De preload-API is niet geladen. Start de applicatie opnieuw.");
@@ -116,6 +144,9 @@ function validateForStart(settings: CompressionSettings): string | null {
   }
   const concurrency = Number($<HTMLInputElement>("concurrency").value);
   if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 8) return "Gelijktijdige taken moeten tussen 1 en 8 liggen.";
+  if (settings.videoCodec === "h265" && (!ffmpegStatusCache?.available || !ffmpegStatusCache.codecs.h265)) {
+    return "H.265 is niet beschikbaar in de huidige FFmpeg-installatie. Kies H.264.";
+  }
   return null;
 }
 
@@ -149,12 +180,6 @@ function savingLabel(result: CompressionResult): { text: string; tone: "ok" | "w
   return ratio >= 0 ? { text: `${text} kleiner`, tone: "ok" } : { text: `${text} groter`, tone: "warn" };
 }
 
-function metaLine(item: BatchItem): string {
-  const metadata = item.metadata;
-  if (!metadata.duration && !metadata.width) return "Metadata volgt zodra FFmpeg het bestand kan lezen";
-  return `${metadata.width}×${metadata.height} · ${metadata.videoCodec}/${metadata.audioCodec ?? "geen audio"}`;
-}
-
 function noteFor(item: BatchItem, settings: CompressionSettings): { text: string; tone: string } {
   if (item.error && item.status !== "cancelled") return { text: item.error, tone: "error" };
   const message = item.progress.message ?? "";
@@ -167,72 +192,68 @@ function noteFor(item: BatchItem, settings: CompressionSettings): { text: string
   return { text: "", tone: "" };
 }
 
-function progressDetail(item: BatchItem): string {
-  const parts = [item.progress.speed, formatEta(item.progress.etaSeconds)];
-  if (item.progress.bitrate && item.progress.bitrate !== "N/A") parts.push(item.progress.bitrate);
-  return parts.filter(Boolean).join(" · ");
+function showAction(row: HTMLElement, action: string, visible: boolean): void {
+  row.querySelector<HTMLButtonElement>(`[data-action="${action}"]`)?.classList.toggle("hidden", !visible);
 }
 
-function showAction(card: HTMLElement, action: string, visible: boolean): void {
-  card.querySelector<HTMLButtonElement>(`[data-action="${action}"]`)?.classList.toggle("hidden", !visible);
+function createRow(id: string): HTMLElement {
+  const row = $<HTMLTemplateElement>("file-row-template").content.firstElementChild!.cloneNode(true) as HTMLElement;
+  row.dataset.id = id;
+  return row;
 }
 
-function createCard(id: string): HTMLElement {
-  const card = $<HTMLTemplateElement>("file-card-template").content.firstElementChild!.cloneNode(true) as HTMLElement;
-  card.dataset.id = id;
-  return card;
-}
-
-function patchCard(card: HTMLElement, item: BatchItem): void {
+function patchRow(row: HTMLElement, item: BatchItem): void {
   const settings = effectiveSettings(item);
-  card.dataset.status = item.status;
-  card.classList.toggle("hidden", !matchesFilter(item));
-  const name = card.querySelector<HTMLElement>(".file-name")!;
+  row.dataset.status = item.status;
+  row.classList.toggle("hidden", !matchesFilter(item));
+  row.classList.toggle("selected", selectedId === item.id);
+  const name = row.querySelector<HTMLElement>(".file-name")!;
   name.textContent = fileName(item.inputPath);
   name.title = item.inputPath;
-  card.querySelector(".file-meta")!.textContent = metaLine(item);
-  const chip = card.querySelector<HTMLElement>(".status-chip")!;
+
+  row.querySelector(".col-res")!.textContent = item.metadata.width ? `${item.metadata.width}×${item.metadata.height}` : "—";
+  row.querySelector(".col-size")!.textContent = formatBytes(item.metadata.size);
+
+  const targetCell = row.querySelector<HTMLElement>(".col-target")!;
+  targetCell.classList.toggle("hidden", settings.mode !== "compress");
+  const input = row.querySelector<HTMLInputElement>(".item-target")!;
+  const nextTarget = String(settings.targetMb);
+  if (document.activeElement !== input && input.value !== nextTarget) input.value = nextTarget;
+  input.disabled = item.status !== "queued" || batchRunning;
+  row.querySelector(".override-tag")?.classList.toggle("hidden", !(item.targetOverridden && item.status === "queued" && settings.mode === "compress"));
+
+  const chip = row.querySelector<HTMLElement>(".status-chip")!;
   chip.textContent = STATUS_LABEL[item.status];
   chip.className = `status-chip ${item.status}`;
 
   const percent = item.status === "completed" ? 100 : Math.max(0, Math.min(100, item.progress.percent));
-  const fill = card.querySelector<HTMLElement>(".progress-fill")!;
+  const fill = row.querySelector<HTMLElement>(".progress-fill")!;
   fill.style.width = `${percent}%`;
   fill.className = `progress-fill ${item.status}`;
-  card.querySelector(".progress-percent")!.textContent = item.status === "running" || item.status === "completed" ? `${Math.round(percent)}%` : "—";
-  card.querySelector(".progress-detail")!.textContent = item.status === "running" ? progressDetail(item) : "";
+  row.querySelector(".progress-percent")!.textContent = item.status === "running" || item.status === "completed" ? `${Math.round(percent)}%` : "—";
 
-  card.querySelector(".metric-size")!.textContent = formatBytes(item.metadata.size);
-  card.querySelector(".metric-duration")!.textContent = formatDuration(item.metadata.duration);
-  const target = card.querySelector<HTMLElement>(".metric-target")!;
-  target.classList.toggle("hidden", settings.mode !== "compress");
-  const input = card.querySelector<HTMLInputElement>(".item-target")!;
-  const nextTarget = String(settings.targetMb);
-  if (document.activeElement !== input && input.value !== nextTarget) input.value = nextTarget;
-  input.disabled = item.status !== "queued" || batchRunning;
-  card.querySelector(".override-tag")?.classList.toggle("hidden", !(item.targetOverridden && item.status === "queued" && settings.mode === "compress"));
-  card.querySelector(".metric-result")!.textContent = item.result ? formatBytes(item.result.outputBytes) : "—";
-  const saving = card.querySelector<HTMLElement>(".metric-saving")!;
+  row.querySelector(".col-result")!.textContent = item.result ? formatBytes(item.result.outputBytes) : "—";
+  const saving = row.querySelector<HTMLElement>(".col-saving")!;
   if (item.result) {
     const label = savingLabel(item.result);
     saving.textContent = label.text;
-    saving.className = `metric-saving ${label.tone}`;
+    saving.className = `col-saving ${label.tone}`;
   } else {
     saving.textContent = "—";
-    saving.className = "metric-saving";
+    saving.className = "col-saving";
   }
 
   const note = noteFor(item, settings);
-  const noteElement = card.querySelector<HTMLElement>(".file-note")!;
+  const noteElement = row.querySelector<HTMLElement>(".file-note")!;
   noteElement.textContent = note.text;
-  noteElement.className = `file-note ${note.tone}`.trim();
+  noteElement.className = `file-note muted ${note.tone}`.trim();
 
-  showAction(card, "cancel", batchRunning && (item.status === "queued" || item.status === "running"));
-  showAction(card, "retry", item.status === "failed" || item.status === "cancelled" || item.status === "completed");
-  showAction(card, "open", Boolean(item.result));
-  showAction(card, "reveal", Boolean(item.result));
-  showAction(card, "save", Boolean(item.result));
-  showAction(card, "remove", item.status !== "running");
+  showAction(row, "cancel", batchRunning && (item.status === "queued" || item.status === "running"));
+  showAction(row, "retry", item.status === "failed" || item.status === "cancelled" || item.status === "completed");
+  showAction(row, "open", Boolean(item.result));
+  showAction(row, "reveal", Boolean(item.result));
+  showAction(row, "save", Boolean(item.result));
+  showAction(row, "remove", item.status !== "running");
 }
 
 function renderQueue(): void {
@@ -240,23 +261,23 @@ function renderQueue(): void {
   const seen = new Set<string>();
   for (const item of items.values()) {
     seen.add(item.id);
-    let card = list.querySelector<HTMLElement>(`.file-card[data-id="${CSS.escape(item.id)}"]`);
-    if (!card) {
-      card = createCard(item.id);
-      list.append(card);
+    let row = list.querySelector<HTMLElement>(`tr[data-id="${CSS.escape(item.id)}"]`);
+    if (!row) {
+      row = createRow(item.id);
+      list.append(row);
     }
-    patchCard(card, item);
+    patchRow(row, item);
   }
-  for (const card of Array.from(list.querySelectorAll<HTMLElement>(".file-card"))) {
-    if (!seen.has(card.dataset.id ?? "")) card.remove();
+  for (const row of Array.from(list.querySelectorAll<HTMLElement>("tr[data-id]"))) {
+    if (!seen.has(row.dataset.id ?? "")) row.remove();
   }
   const ordered = [...items.values()].flatMap((item) => {
-    const card = list.querySelector(`.file-card[data-id="${CSS.escape(item.id)}"]`);
-    return card ? [card] : [];
+    const row = list.querySelector(`tr[data-id="${CSS.escape(item.id)}"]`);
+    return row ? [row] : [];
   });
-  const current = Array.from(list.querySelectorAll(".file-card"));
-  if (current.length !== ordered.length || current.some((card, index) => card !== ordered[index])) {
-    for (const card of ordered) list.append(card);
+  const current = Array.from(list.querySelectorAll("tr[data-id]"));
+  if (current.length !== ordered.length || current.some((row, index) => row !== ordered[index])) {
+    for (const row of ordered) list.append(row);
   }
   const visible = [...items.values()].some(matchesFilter);
   $("files-section").classList.toggle("hidden", items.size === 0);
@@ -265,6 +286,7 @@ function renderQueue(): void {
   const bytes = [...items.values()].reduce((total, item) => total + (item.metadata.size || 0), 0);
   $("file-count").textContent = `${items.size} bestand${items.size === 1 ? "" : "en"}${bytes ? ` · ${formatBytes(bytes)}` : ""}`;
   renderSummary();
+  renderDetails();
 }
 
 function renderSummary(): void {
@@ -301,8 +323,8 @@ function syncActions(summary = localSummary()): void {
   start.textContent = batchRunning ? "Bezig…" : currentMode() === "convert" ? "Start conversie" : "Start compressie";
   let reason = "";
   if (ffmpegState === "checking") reason = "FFmpeg wordt nog gecontroleerd.";
-  else if (!ffmpegReady) reason = "FFmpeg is niet beschikbaar.";
-  else if (!summary.queued) reason = items.size ? "Geen wachtende bestanden." : "Voeg eerst video's toe.";
+  else if (!ffmpegReady) reason = "FFmpeg is niet beschikbaar. Ga naar Instellingen.";
+  else if (!summary.queued) reason = items.size ? "Geen wachtende bestanden." : "Voeg eerst video’s toe.";
   start.disabled = batchRunning || !ffmpegReady || summary.queued === 0;
   $("start-hint").textContent = batchRunning ? "De batch loopt. Je kunt een bestand apart annuleren." : reason;
   $("cancel-button").classList.toggle("hidden", !batchRunning);
@@ -318,10 +340,32 @@ function updateModeUi(): void {
   $("codec-field").classList.toggle("hidden", converting);
   $("convert-note").classList.toggle("hidden", !converting);
   $("advanced-toggle").classList.toggle("hidden", converting);
-  $("advanced-options").classList.toggle("hidden", converting || !$<HTMLInputElement>("advanced").checked);
+  syncActions();
+  renderQueue();
+}
+
+function syncSettingsMirrors(fromConverter: boolean): void {
+  const pairs: Array<[string, string]> = [
+    ["target-mb", "settings-target-mb"],
+    ["audio-bitrate", "settings-audio"],
+    ["video-codec", "settings-codec"],
+    ["preset", "settings-preset"],
+    ["concurrency", "settings-concurrency"],
+    ["resolution", "settings-resolution"],
+    ["framerate", "settings-framerate"]
+  ];
+  for (const [a, b] of pairs) {
+    const source = $<HTMLInputElement | HTMLSelectElement>(fromConverter ? a : b);
+    const target = $<HTMLInputElement | HTMLSelectElement>(fromConverter ? b : a);
+    if (document.activeElement !== target) target.value = source.value;
+  }
+  const keepSource = $<HTMLInputElement>(fromConverter ? "keep-audio" : "settings-keep-audio");
+  const keepTarget = $<HTMLInputElement>(fromConverter ? "settings-keep-audio" : "keep-audio");
+  keepTarget.checked = keepSource.checked;
 }
 
 function savePreferences(): void {
+  const theme = document.querySelector<HTMLInputElement>('input[name="theme"]:checked')?.value as ThemePreference | undefined;
   const preferences: Preferences = {
     mode: currentMode(),
     targetMb: Number($<HTMLInputElement>("target-mb").value) || 50,
@@ -332,7 +376,8 @@ function savePreferences(): void {
     resolution: $<HTMLSelectElement>("resolution").value,
     frameRate: $<HTMLSelectElement>("framerate").value,
     keepAudio: $<HTMLInputElement>("keep-audio").checked,
-    advanced: $<HTMLInputElement>("advanced").checked
+    advanced: $<HTMLDetailsElement>("advanced-toggle").open,
+    theme: theme ?? "system"
   };
   localStorage.setItem(STORAGE_KEY, JSON.stringify(preferences));
 }
@@ -343,18 +388,92 @@ function setSelect(id: string, value: string | undefined): void {
   if (Array.from(select.options).some((option) => option.value === value)) select.value = value;
 }
 
+function applyTheme(theme: ThemePreference): void {
+  document.body.dataset.theme = theme;
+  const input = document.querySelector<HTMLInputElement>(`input[name="theme"][value="${theme}"]`);
+  if (input) input.checked = true;
+  void getApi().setThemeSource(theme).catch(() => undefined);
+}
+
+function sanitizePreferences(raw: string | null): Preferences | null {
+  if (!raw) return null;
+  try {
+    const value = JSON.parse(raw) as Preferences;
+    if (!value || typeof value !== "object") return null;
+    const preferences: Preferences = {};
+    if (value.mode === "compress" || value.mode === "convert") preferences.mode = value.mode;
+    if (typeof value.targetMb === "number" && Number.isFinite(value.targetMb) && value.targetMb > 0) preferences.targetMb = value.targetMb;
+    if (typeof value.concurrency === "number" && Number.isFinite(value.concurrency)) {
+      preferences.concurrency = Math.min(8, Math.max(1, Math.round(value.concurrency)));
+    }
+    if (value.audioBitrate === "96" || value.audioBitrate === "128" || value.audioBitrate === "160" || value.audioBitrate === "192") {
+      preferences.audioBitrate = value.audioBitrate;
+    }
+    if (value.videoCodec === "h264" || value.videoCodec === "h265") preferences.videoCodec = value.videoCodec;
+    if (value.preset === "ultrafast" || value.preset === "fast" || value.preset === "medium" || value.preset === "slow") preferences.preset = value.preset;
+    if (value.resolution === "original" || value.resolution === "1080p" || value.resolution === "720p" || value.resolution === "480p") {
+      preferences.resolution = value.resolution;
+    }
+    if (value.frameRate === "original" || value.frameRate === "24" || value.frameRate === "25" || value.frameRate === "30" || value.frameRate === "60") {
+      preferences.frameRate = value.frameRate;
+    }
+    if (typeof value.keepAudio === "boolean") preferences.keepAudio = value.keepAudio;
+    if (typeof value.advanced === "boolean") preferences.advanced = value.advanced;
+    if (value.theme === "system" || value.theme === "light" || value.theme === "dark") preferences.theme = value.theme;
+    return preferences;
+  } catch {
+    return null;
+  }
+}
+
+function sanitizeHistory(raw: string | null): HistoryEntry[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    const entries: HistoryEntry[] = [];
+    for (const entry of parsed) {
+      if (!entry || typeof entry !== "object") continue;
+      const candidate = entry as Partial<HistoryEntry>;
+      if (typeof candidate.id !== "string" || typeof candidate.inputPath !== "string") continue;
+      if (typeof candidate.finishedAt !== "string") continue;
+      if (candidate.status !== "completed" && candidate.status !== "failed" && candidate.status !== "cancelled") continue;
+      if (typeof candidate.originalBytes !== "number" || !Number.isFinite(candidate.originalBytes)) continue;
+      entries.push({
+        id: candidate.id,
+        inputPath: candidate.inputPath,
+        outputPath: typeof candidate.outputPath === "string" ? candidate.outputPath : null,
+        finishedAt: candidate.finishedAt,
+        originalBytes: candidate.originalBytes,
+        outputBytes: typeof candidate.outputBytes === "number" && Number.isFinite(candidate.outputBytes) ? candidate.outputBytes : null,
+        status: candidate.status,
+        error: typeof candidate.error === "string" ? candidate.error : undefined,
+        durationSeconds: typeof candidate.durationSeconds === "number" && Number.isFinite(candidate.durationSeconds)
+          ? candidate.durationSeconds
+          : null
+      });
+      if (entries.length >= 200) break;
+    }
+    return entries;
+  } catch {
+    return [];
+  }
+}
+
 function loadPreferences(): void {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return;
-    const preferences = JSON.parse(raw) as Preferences;
+    const preferences = sanitizePreferences(localStorage.getItem(STORAGE_KEY));
+    if (!preferences) {
+      applyTheme("system");
+      return;
+    }
     if (preferences.mode === "compress" || preferences.mode === "convert") {
       const input = document.querySelector<HTMLInputElement>(`input[name="processing-mode"][value="${preferences.mode}"]`);
       if (input) input.checked = true;
     }
     if (typeof preferences.targetMb === "number" && preferences.targetMb > 0) $<HTMLInputElement>("target-mb").value = String(preferences.targetMb);
     if (typeof preferences.concurrency === "number") {
-      $<HTMLInputElement>("concurrency").value = String(Math.min(8, Math.max(1, Math.round(preferences.concurrency))));
+      $<HTMLInputElement>("concurrency").value = String(preferences.concurrency);
     }
     setSelect("audio-bitrate", preferences.audioBitrate);
     setSelect("video-codec", preferences.videoCodec);
@@ -362,130 +481,320 @@ function loadPreferences(): void {
     setSelect("resolution", preferences.resolution);
     setSelect("framerate", preferences.frameRate);
     if (typeof preferences.keepAudio === "boolean") $<HTMLInputElement>("keep-audio").checked = preferences.keepAudio;
-    if (typeof preferences.advanced === "boolean") $<HTMLInputElement>("advanced").checked = preferences.advanced;
+    if (typeof preferences.advanced === "boolean") $<HTMLDetailsElement>("advanced-toggle").open = preferences.advanced;
+    applyTheme(preferences.theme === "light" || preferences.theme === "dark" ? preferences.theme : "system");
+    syncSettingsMirrors(true);
   } catch {
     localStorage.removeItem(STORAGE_KEY);
+    applyTheme("system");
   }
 }
 
-function onSettingsChanged(): void {
-  updateModeUi();
-  savePreferences();
-  renderQueue();
-}
-
-function resetQueuedItem(item: BatchItem): void {
-  item.status = "queued";
-  item.error = undefined;
-  item.result = undefined;
-  item.progress = { status: "analyzing", percent: 0, speed: "", etaSeconds: null, bitrate: "", message: "Wachtend" };
-}
-
-function removeItems(predicate: (item: BatchItem) => boolean): void {
-  for (const [id, item] of items) {
-    if (!predicate(item)) continue;
-    dismissed.add(id);
-    if (batchRunning && (item.status === "queued" || item.status === "running")) getApi().cancelItem(id);
-    items.delete(id);
+function loadHistory(): void {
+  historyEntries.length = 0;
+  try {
+    const entries = sanitizeHistory(localStorage.getItem(HISTORY_KEY));
+    historyEntries.push(...entries);
+    if (localStorage.getItem(HISTORY_KEY) && entries.length === 0) localStorage.removeItem(HISTORY_KEY);
+  } catch {
+    localStorage.removeItem(HISTORY_KEY);
   }
+}
+
+function saveHistory(): void {
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(historyEntries.slice(0, 200)));
+}
+
+function pushHistory(item: BatchItem): void {
+  if (item.status !== "completed" && item.status !== "failed" && item.status !== "cancelled") return;
+  if (item.status === "completed" && !item.result?.outputPath) return;
+  const entry: HistoryEntry = {
+    id: `${item.id}-${item.status}-${item.result?.outputPath ?? item.error ?? "done"}`,
+    inputPath: item.inputPath,
+    outputPath: item.result?.outputPath ?? null,
+    finishedAt: new Date().toISOString(),
+    originalBytes: item.metadata.size || item.result?.originalBytes || 0,
+    outputBytes: item.result?.outputBytes ?? null,
+    status: item.status,
+    error: item.error,
+    durationSeconds: item.metadata.duration || null
+  };
+  if (historyEntries.some((existing) => existing.id === entry.id)) return;
+  historyEntries.unshift(entry);
+  if (historyEntries.length > 200) historyEntries.length = 200;
+  saveHistory();
+  renderHistory();
+}
+
+function renderHistory(): void {
+  const list = $("history-list");
+  list.replaceChildren();
+  $("history-empty").classList.toggle("hidden", historyEntries.length > 0);
+  for (const entry of historyEntries) {
+    const tr = document.createElement("tr");
+    const saving = entry.outputBytes != null && entry.originalBytes > 0
+      ? `${Math.abs((1 - entry.outputBytes / entry.originalBytes) * 100).toFixed(1)}%`
+      : "—";
+    tr.innerHTML = `
+      <td title="${entry.inputPath}"><strong>${fileName(entry.inputPath)}</strong></td>
+      <td>${new Date(entry.finishedAt).toLocaleString("nl-BE")}</td>
+      <td>${formatBytes(entry.originalBytes)}</td>
+      <td>${entry.outputBytes != null ? formatBytes(entry.outputBytes) : "—"}</td>
+      <td>${saving}</td>
+      <td><span class="status-chip ${entry.status}">${STATUS_LABEL[entry.status]}</span></td>
+      <td class="col-actions"></td>`;
+    const actions = tr.querySelector(".col-actions")!;
+    if (entry.outputPath) {
+      const openBtn = document.createElement("button");
+      openBtn.className = "btn text";
+      openBtn.type = "button";
+      openBtn.textContent = "Afspelen";
+      openBtn.onclick = () => { void getApi().openFile(entry.outputPath!).then((error) => { if (error) toast(error, "error"); }); };
+      const revealBtn = document.createElement("button");
+      revealBtn.className = "btn text";
+      revealBtn.type = "button";
+      revealBtn.textContent = "In map";
+      revealBtn.onclick = () => { void getApi().showInFolder(entry.outputPath!); };
+      actions.append(openBtn, revealBtn);
+    } else {
+      actions.textContent = entry.error ? entry.error.slice(0, 48) : "—";
+    }
+    list.append(tr);
+  }
+}
+
+function renderDetails(): void {
+  const empty = $("detail-empty");
+  const body = $("detail-body");
+  const item = selectedId ? items.get(selectedId) : null;
+  if (!item) {
+    empty.classList.remove("hidden");
+    body.classList.add("hidden");
+    body.replaceChildren();
+    return;
+  }
+  empty.classList.add("hidden");
+  body.classList.remove("hidden");
+  const settings = effectiveSettings(item);
+  const rows: Array<[string, string]> = [
+    ["Bestand", fileName(item.inputPath)],
+    ["Pad", item.inputPath],
+    ["Grootte", formatBytes(item.metadata.size)],
+    ["Duur", formatDuration(item.metadata.duration)],
+    ["Resolutie", item.metadata.width ? `${item.metadata.width}×${item.metadata.height}` : "—"],
+    ["Video", item.metadata.videoCodec || "—"],
+    ["Audio", item.metadata.audioCodec ?? "geen"],
+    ["Framerate", item.metadata.frameRate ? `${item.metadata.frameRate}` : "—"],
+    ["Modus", settings.mode === "compress" ? "Comprimeren" : "Converteren"],
+    ["Doel", settings.mode === "compress" ? `${settings.targetMb} MB` : "—"],
+    ["Codec", settings.videoCodec.toUpperCase()],
+    ["Preset", settings.preset],
+    ["Status", STATUS_LABEL[item.status]]
+  ];
+  if (item.result) {
+    rows.push(["Resultaat", formatBytes(item.result.outputBytes)], ["Uitvoer", item.result.outputPath], ["Besparing", savingLabel(item.result).text]);
+  }
+  if (item.error) rows.push(["Fout", item.error]);
+  body.replaceChildren(...rows.flatMap(([dt, dd]) => {
+    const term = document.createElement("dt");
+    term.textContent = dt;
+    const def = document.createElement("dd");
+    def.textContent = dd;
+    return [term, def];
+  }));
+}
+
+function selectItem(id: string | null): void {
+  selectedId = id;
   renderQueue();
+}
+
+function navigate(page: PageId): void {
+  currentPage = page;
+  document.querySelectorAll<HTMLButtonElement>(".nav-item").forEach((button) => {
+    const active = button.dataset.page === page;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", active ? "true" : "false");
+  });
+  document.querySelectorAll<HTMLElement>(".page").forEach((panel) => {
+    const active = panel.dataset.pagePanel === page;
+    panel.classList.toggle("active", active);
+    panel.hidden = !active;
+  });
+  $("page-title").textContent = PAGE_COPY[page].title;
+  $("page-subtitle").textContent = PAGE_COPY[page].subtitle;
+  $("converter-action-bar").classList.toggle("hidden", page !== "converter");
+  if (page === "about") renderAbout();
+  if (page === "history") renderHistory();
+}
+
+function renderAbout(): void {
+  const list = $("about-list");
+  const rows: Array<[string, string]> = [
+    ["Applicatie", appInfo?.name ?? "Video Compressor"],
+    ["Versie", appInfo?.version ?? "—"],
+    ["Electron", appInfo?.electron ?? "—"],
+    ["FFmpeg", ffmpegStatusCache?.version ?? "—"],
+    ["FFmpeg-status", ffmpegStatusCache?.message ?? "—"],
+    ["FFmpeg-locatie", ffmpegStatusCache?.location ?? "—"],
+    ["Installatiemap", appInfo?.appDirectory ?? "—"],
+    ["User data", appInfo?.userData ?? "—"],
+    ["Update", latestUpdate?.message ?? "—"]
+  ];
+  list.replaceChildren(...rows.flatMap(([dt, dd]) => {
+    const term = document.createElement("dt");
+    term.textContent = dt;
+    const def = document.createElement("dd");
+    def.textContent = dd;
+    return [term, def];
+  }));
 }
 
 async function addFiles(paths: string[]): Promise<void> {
-  const known = new Set([...items.values()].map((item) => item.inputPath.toLowerCase()));
-  let added = 0;
-  let skipped = 0;
-  const errors: string[] = [];
+  if (!paths.length) return;
+  const unique: string[] = [];
+  const existing = new Set([...items.values()].map((item) => item.inputPath.toLowerCase()));
   for (const path of paths) {
-    if (!path) continue;
-    if (known.has(path.toLowerCase())) { skipped++; continue; }
+    const key = path.toLowerCase();
+    if (existing.has(key) || unique.some((candidate) => candidate.toLowerCase() === key)) continue;
+    unique.push(path);
+  }
+  if (!unique.length) {
+    toast("Die bestanden staan al in de wachtrij.");
+    return;
+  }
+  let failed = 0;
+  for (const path of unique) {
     try {
       const metadata = await getApi().probe(path);
-      const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      items.set(id, {
-        id, inputPath: path, metadata, settings: readSettings(), targetOverridden: false, status: "queued",
+      const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      const item: BatchItem = {
+        id,
+        inputPath: path,
+        metadata,
+        settings: readSettings(),
+        status: "queued",
         progress: { status: "analyzing", percent: 0, speed: "", etaSeconds: null, bitrate: "", message: "Wachtend" }
-      });
-      known.add(path.toLowerCase());
-      added++;
+      };
+      items.set(id, item);
+      if (!selectedId) selectedId = id;
     } catch (error) {
-      errors.push(`${fileName(path)}: ${(error as Error).message}`);
+      failed += 1;
+      if (failed <= 3) toast(error instanceof Error ? error.message : "Bestand kon niet worden gelezen.", "error");
     }
   }
+  const added = unique.length - failed;
+  if (added > 0) toast(`${added} bestand${added === 1 ? "" : "en"} toegevoegd.`, "ok");
   renderQueue();
-  if (added) toast(`${added} bestand${added === 1 ? "" : "en"} toegevoegd.`, "ok");
-  else if (skipped) toast("Die bestanden staan al in de wachtrij.");
-  if (errors.length) toast(errors.slice(0, 3).join(" "), "error");
+}
+
+function filePaths(transfer: DataTransfer | null): string[] {
+  if (!transfer) return [];
+  return Array.from(transfer.files)
+    .map((file) => {
+      try { return getApi().getPathForFile(file); } catch { return (file as File & { path?: string }).path ?? ""; }
+    })
+    .filter(Boolean);
 }
 
 async function startBatch(): Promise<void> {
-  if (batchRunning) return;
   const settings = readSettings();
   const problem = validateForStart(settings);
-  if (problem) { toast(problem, "error"); return; }
-  const queued = [...items.values()].filter((item) => item.status === "queued");
-  if (!queued.length) { toast("Er staan geen wachtende bestanden klaar."); return; }
-  if (!ffmpegReady) { toast("FFmpeg is nog niet klaar. Installeer of kies eerst een installatie.", "error"); return; }
-  const concurrency = Number($<HTMLInputElement>("concurrency").value);
-  for (const item of queued) item.settings = effectiveSettings(item);
-  renderQueue();
+  if (problem) {
+    toast(problem, "error");
+    return;
+  }
+  const queued = [...items.values()].filter((item) => item.status === "queued").map((item) => ({
+    ...item,
+    settings: effectiveSettings(item),
+    progress: { status: "analyzing" as const, percent: 0, speed: "", etaSeconds: null, bitrate: "", message: "Wachtend" },
+    error: undefined,
+    result: undefined
+  }));
+  if (!queued.length) return;
+  for (const item of queued) items.set(item.id, item);
   batchRunning = true;
-  syncActions();
+  renderQueue();
   try {
-    await getApi().startBatch(queued.map((item) => ({ ...item })), concurrency);
-    const summary = localSummary();
-    if (summary.failed) toast(`${summary.failed} bestand${summary.failed === 1 ? "" : "en"} mislukt.`, "error");
-    else if (summary.completed && !summary.cancelled) toast(`${summary.completed} bestand${summary.completed === 1 ? "" : "en"} klaar.`, "ok");
-  } catch (error) {
-    toast((error as Error).message, "error");
+    await getApi().startBatch(queued, Number($<HTMLInputElement>("concurrency").value) || 1);
   } finally {
     batchRunning = false;
     renderQueue();
+    const summary = localSummary();
+    if (summary.failed) toast(`${summary.failed} bestand(en) mislukt.`, "error");
+    else if (summary.completed) toast(`${summary.completed} bestand(en) klaar.`, "ok");
   }
 }
 
 function applyFfmpegStatus(status: FfmpegStatus): void {
-  const becameReady = status.available && !ffmpegReady;
-  ffmpegReady = status.available;
+  ffmpegStatusCache = status;
   ffmpegState = status.state;
+  ffmpegReady = status.available;
   const panel = $("ffmpeg-panel");
+  const chip = $("sidebar-ffmpeg");
   panel.classList.remove("is-ok", "is-bad", "is-wait");
-  const pill = $("binary-status");
   if (status.state === "checking") {
     panel.classList.add("is-wait");
-    pill.textContent = "FFmpeg controleren";
-    pill.className = "pill wait";
+    chip.dataset.state = "wait";
+    chip.textContent = "FFmpeg controleren";
   } else if (status.available) {
     panel.classList.add("is-ok");
-    pill.textContent = "FFmpeg klaar";
-    pill.className = "pill ok";
-    if (becameReady) $<HTMLDetailsElement>("ffmpeg-details").open = false;
+    chip.dataset.state = "ok";
+    chip.textContent = "FFmpeg klaar";
   } else {
     panel.classList.add("is-bad");
-    pill.textContent = "FFmpeg ontbreekt";
-    pill.className = "pill error";
-    $<HTMLDetailsElement>("ffmpeg-details").open = true;
+    chip.dataset.state = "error";
+    chip.textContent = "FFmpeg ontbreekt";
   }
   $("ffmpeg-status").textContent = status.state === "checking"
     ? "Bezig met zoeken en valideren…"
-    : status.available ? `Gereed · ${status.version ?? "onbekende versie"}` : status.message;
+    : status.message;
   $("ffmpeg-location").textContent = status.location ?? (status.available ? "Windows PATH" : "Niet gevonden");
   $("ffmpeg-codecs").textContent = `H.264 ${status.codecs.h264 ? "aanwezig" : "ontbreekt"} · H.265 ${status.codecs.h265 ? "aanwezig" : "ontbreekt"} · AAC ${status.codecs.aac ? "aanwezig" : "ontbreekt"}`;
-  $("ffmpeg-install").classList.toggle("hidden", status.available || status.state === "checking");
-  $<HTMLButtonElement>("ffmpeg-install-button").disabled = status.available || installing || status.state === "checking";
-  $<HTMLButtonElement>("ffmpeg-select").disabled = installing || status.state === "checking";
-  $<HTMLButtonElement>("ffmpeg-recheck").disabled = installing || status.state === "checking";
+  $("ffmpeg-install").classList.toggle("hidden", status.available || status.state === "checking" || !installing);
+  applyCodecAvailability(status);
   syncActions();
-  if (becameReady) void reprobeQueued();
+  if (status.available) void reprobeQueued();
+  if (currentPage === "about") renderAbout();
+}
+
+function applyCodecAvailability(status: FfmpegStatus): void {
+  for (const id of ["video-codec", "settings-codec"] as const) {
+    const select = $<HTMLSelectElement>(id);
+    const h265 = Array.from(select.options).find((option) => option.value === "h265");
+    if (!h265) continue;
+    if (!status.available) {
+      h265.disabled = true;
+      h265.textContent = "H.265 (FFmpeg niet beschikbaar)";
+    } else if (!status.codecs.h265) {
+      h265.disabled = true;
+      h265.textContent = "H.265 (niet ondersteund door deze FFmpeg)";
+    } else {
+      h265.disabled = false;
+      h265.textContent = "H.265";
+    }
+    if (h265.disabled && select.value === "h265") {
+      select.value = "h264";
+      if (id === "video-codec") syncSettingsMirrors(true);
+      else syncSettingsMirrors(false);
+      savePreferences();
+    }
+  }
 }
 
 async function reprobeQueued(): Promise<void> {
-  if (reprobeRunning) return;
+  if (reprobeRunning || !ffmpegReady) return;
+  const pending = [...items.values()].filter((item) => item.status === "queued" && (!item.metadata.duration || !item.metadata.width));
+  if (!pending.length) return;
   reprobeRunning = true;
   try {
-    for (const item of [...items.values()]) {
-      if (item.status !== "queued" || (item.metadata.duration > 0 && item.metadata.width > 0)) continue;
-      try { item.metadata = await getApi().probe(item.inputPath); } catch { /* De start probeert het opnieuw. */ }
+    for (const item of pending) {
+      try {
+        const metadata = await getApi().probe(item.inputPath);
+        items.set(item.id, { ...item, metadata });
+      } catch {
+        // Keep placeholder metadata until start-batch rechecks.
+      }
     }
     renderQueue();
   } finally {
@@ -493,252 +802,277 @@ async function reprobeQueued(): Promise<void> {
   }
 }
 
-function filePaths(data: DataTransfer | null): string[] {
-  if (!data) return [];
-  return Array.from(data.files).map((file) => (file as File & { path?: string }).path ?? "").filter(Boolean);
-}
-
-let watchFfmpeg = true;
-
-function watchStatus(): void {
-  if (!watchFfmpeg || ffmpegState !== "checking") return;
-  window.setTimeout(() => {
-    void getApi().ffmpegStatus().then((status) => {
-      applyFfmpegStatus(status);
-      watchStatus();
-    }).catch((error: Error) => toast(error.message, "error"));
-  }, 500);
-}
-
-loadPreferences();
-updateModeUi();
-renderQueue();
-
 function applyUpdateState(state: UpdateState): void {
+  latestUpdate = state;
   const panel = $("update-panel");
   const visible = state.status === "checking" || state.status === "available" || state.status === "downloading" || state.status === "downloaded" || state.status === "error";
   panel.classList.toggle("hidden", !visible);
   panel.dataset.status = state.status;
   $("update-status").textContent = state.message;
+  $("settings-update-status").textContent = state.message;
   $("update-progress-wrap").classList.toggle("hidden", state.status !== "downloading");
   $("update-progress").style.width = `${Math.max(0, Math.min(100, state.percent))}%`;
   $("update-download").classList.toggle("hidden", state.status !== "available");
   $("update-install").classList.toggle("hidden", state.status !== "downloaded");
   $("update-later").classList.toggle("hidden", state.status !== "available" && state.status !== "downloaded");
-  $<HTMLButtonElement>("update-check").disabled = state.status === "checking" || state.status === "downloading";
-  $<HTMLButtonElement>("update-download").disabled = state.status === "downloading";
-  $<HTMLButtonElement>("check-updates").disabled = state.status === "checking" || state.status === "downloading";
-  const versionButton = $("check-updates");
-  versionButton.textContent = state.availableVersion && (state.status === "available" || state.status === "downloading" || state.status === "downloaded")
-    ? `v${state.currentVersion} → v${state.availableVersion}`
-    : `v${state.currentVersion}`;
+  $("settings-update-download").classList.toggle("hidden", state.status !== "available");
+  $("settings-update-install").classList.toggle("hidden", state.status !== "downloaded");
+  const versionButton = $<HTMLButtonElement>("check-updates");
   versionButton.classList.toggle("has-update", state.status === "available" || state.status === "downloaded");
-  versionButton.title = state.status === "disabled" ? state.message : "Klik om op updates te controleren";
+  versionButton.textContent = state.availableVersion && (state.status === "available" || state.status === "downloading" || state.status === "downloaded")
+    ? `Update ${state.availableVersion}`
+    : "Updates";
   const notes = $("update-notes");
   const noteText = state.releaseNotes?.trim() ?? "";
   notes.textContent = noteText;
   notes.classList.toggle("hidden", !noteText || (state.status !== "available" && state.status !== "downloaded"));
+  if (appInfo) $("sidebar-version").textContent = `v${appInfo.version}`;
+  if (currentPage === "about") renderAbout();
 }
 
-async function checkUpdates(manual = false): Promise<void> {
-  try {
-    const state = await getApi().checkForUpdates();
-    applyUpdateState(state);
-    if (!manual) return;
-    if (state.status === "not-available") toast(state.message, "ok");
-    if (state.status === "available") toast(`Update ${state.availableVersion} beschikbaar.`, "ok");
-    if (state.status === "error") toast(state.message, "error");
-  } catch (error) {
-    toast((error as Error).message, "error");
+getApi().onBatchUpdate((update) => {
+  const previous = items.get(update.item.id);
+  items.set(update.item.id, update.item);
+  if (previous && previous.status !== update.item.status && (update.item.status === "completed" || update.item.status === "failed" || update.item.status === "cancelled")) {
+    pushHistory(update.item);
   }
+  renderQueue();
+});
+
+getApi().onBinaryStatus(applyFfmpegStatus);
+getApi().onBinaryError((message) => toast(message, "error"));
+getApi().onFfmpegInstallProgress((percent) => {
+  installing = true;
+  $("ffmpeg-install").classList.remove("hidden");
+  $("ffmpeg-install-progress").style.width = `${Math.max(0, Math.min(100, percent))}%`;
+});
+getApi().onUpdateStatus(applyUpdateState);
+
+document.querySelectorAll<HTMLButtonElement>(".nav-item").forEach((button) => {
+  button.onclick = () => navigate((button.dataset.page as PageId) || "converter");
+});
+
+document.querySelectorAll<HTMLInputElement>('input[name="processing-mode"]').forEach((input) => {
+  input.addEventListener("change", () => {
+    updateModeUi();
+    savePreferences();
+  });
+});
+
+document.querySelectorAll<HTMLInputElement>('input[name="theme"]').forEach((input) => {
+  input.addEventListener("change", () => {
+    if (!input.checked) return;
+    applyTheme(input.value as ThemePreference);
+    savePreferences();
+  });
+});
+
+for (const id of ["target-mb", "audio-bitrate", "video-codec", "preset", "concurrency", "resolution", "framerate", "keep-audio"]) {
+  $(id).addEventListener("change", () => {
+    syncSettingsMirrors(true);
+    savePreferences();
+    renderQueue();
+  });
+}
+$("advanced-toggle").addEventListener("toggle", () => savePreferences());
+
+for (const id of ["settings-target-mb", "settings-audio", "settings-codec", "settings-preset", "settings-concurrency", "settings-resolution", "settings-framerate", "settings-keep-audio"]) {
+  $(id).addEventListener("change", () => {
+    syncSettingsMirrors(false);
+    savePreferences();
+    updateModeUi();
+  });
 }
 
-void (async () => {
+$("queue-filters").onclick = (event) => {
+  const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-filter]");
+  if (!button?.dataset.filter) return;
+  queueFilter = button.dataset.filter as QueueFilter;
+  renderQueue();
+};
+
+$("file-list").onclick = (event) => {
+  const target = event.target as HTMLElement;
+  const row = target.closest<HTMLElement>("tr[data-id]");
+  if (!row?.dataset.id) return;
+  const item = items.get(row.dataset.id);
+  if (!item) return;
+  const action = target.closest<HTMLButtonElement>("[data-action]")?.dataset.action;
+  if (!action) {
+    selectItem(item.id);
+    return;
+  }
+  event.stopPropagation();
+  if (action === "cancel") getApi().cancelItem(item.id);
+  else if (action === "retry") {
+    items.set(item.id, {
+      ...item,
+      status: "queued",
+      error: undefined,
+      result: undefined,
+      settings: readSettings(),
+      progress: { status: "analyzing", percent: 0, speed: "", etaSeconds: null, bitrate: "", message: "Wachtend" }
+    });
+    renderQueue();
+  } else if (action === "open" && item.result) void getApi().openFile(item.result.outputPath).then((error) => { if (error) toast(error, "error"); });
+  else if (action === "reveal" && item.result) void getApi().showInFolder(item.result.outputPath);
+  else if (action === "save" && item.result) {
+    void getApi().saveCopy(item.result.outputPath).then((path) => { if (path) toast("Kopie opgeslagen.", "ok"); });
+  } else if (action === "remove" && item.status !== "running") {
+    items.delete(item.id);
+    dismissed.add(item.id);
+    if (selectedId === item.id) selectedId = null;
+    renderQueue();
+  }
+};
+
+$("file-list").oninput = (event) => {
+  const input = event.target as HTMLInputElement;
+  if (!(input instanceof HTMLInputElement) || !input.classList.contains("item-target")) return;
+  const row = input.closest<HTMLElement>("tr[data-id]");
+  const item = row?.dataset.id ? items.get(row.dataset.id) : null;
+  if (!item || item.status !== "queued" || batchRunning) return;
+  const value = Number(input.value);
+  if (!Number.isFinite(value) || value <= 0) {
+    toast("Doelgrootte moet groter zijn dan 0 MB.", "error");
+    return;
+  }
+  items.set(item.id, {
+    ...item,
+    targetOverridden: true,
+    settings: { ...effectiveSettings(item), targetMb: value }
+  });
+  renderDetails();
+};
+
+$("select-button").onclick = () => { void getApi().selectFiles().then(addFiles); };
+$("compress-button").onclick = () => { void startBatch().catch((error: Error) => toast(error.message, "error")); };
+$("cancel-button").onclick = () => getApi().cancelBatch();
+$("retry-failed").onclick = () => {
+  for (const item of items.values()) {
+    if (item.status === "failed" || item.status === "cancelled") {
+      items.set(item.id, {
+        ...item,
+        status: "queued",
+        error: undefined,
+        result: undefined,
+        progress: { status: "analyzing", percent: 0, speed: "", etaSeconds: null, bitrate: "", message: "Wachtend" }
+      });
+    }
+  }
+  renderQueue();
+};
+$("clear-completed").onclick = () => {
+  for (const [id, item] of items) if (item.status === "completed") items.delete(id);
+  if (selectedId && !items.has(selectedId)) selectedId = null;
+  renderQueue();
+};
+$("clear-button").onclick = () => {
+  for (const [id, item] of items) if (item.status !== "running") items.delete(id);
+  if (selectedId && !items.has(selectedId)) selectedId = null;
+  renderQueue();
+};
+$("reset-targets").onclick = () => {
+  let count = 0;
+  const globalTarget = Number($<HTMLInputElement>("target-mb").value) || 50;
+  for (const item of items.values()) {
+    if (item.status === "queued" && item.targetOverridden) {
+      items.set(item.id, { ...item, targetOverridden: false, settings: { ...item.settings, targetMb: globalTarget } });
+      count += 1;
+    }
+  }
+  toast(count ? `${count} doelgrootte${count === 1 ? "" : "s"} teruggezet.` : "Geen afwijkende doelgroottes.", count ? "ok" : "info");
+  renderQueue();
+};
+
+$("ffmpeg-recheck").onclick = () => { void getApi().recheckFfmpeg().then(applyFfmpegStatus); };
+$("ffmpeg-select").onclick = () => { void getApi().selectFfmpeg().then(applyFfmpegStatus).catch((error: Error) => toast(error.message, "error")); };
+$("ffmpeg-install-button").onclick = () => {
+  installing = true;
+  $("ffmpeg-install").classList.remove("hidden");
+  void getApi().installFfmpeg().then((status) => {
+    installing = false;
+    applyFfmpegStatus(status);
+    toast(status.available ? "FFmpeg geïnstalleerd." : status.message, status.available ? "ok" : "error");
+  }).catch((error: Error) => {
+    installing = false;
+    toast(error.message, "error");
+  });
+};
+
+const runUpdateCheck = () => { void getApi().checkForUpdates().then(applyUpdateState).catch((error: Error) => toast(error.message, "error")); };
+const runUpdateDownload = () => { void getApi().downloadUpdate().then(applyUpdateState).catch((error: Error) => toast(error.message, "error")); };
+const runUpdateInstall = () => { void getApi().installUpdate(); };
+$("check-updates").onclick = runUpdateCheck;
+$("update-check").onclick = runUpdateCheck;
+$("settings-update-check").onclick = runUpdateCheck;
+$("update-download").onclick = runUpdateDownload;
+$("settings-update-download").onclick = runUpdateDownload;
+$("update-install").onclick = runUpdateInstall;
+$("settings-update-install").onclick = runUpdateInstall;
+$("update-later").onclick = () => $("update-panel").classList.add("hidden");
+$("history-clear").onclick = () => {
+  historyEntries.length = 0;
+  saveHistory();
+  renderHistory();
+};
+$("about-copy").onclick = async () => {
+  const text = Array.from($("about-list").querySelectorAll("dt")).map((dt, index) => {
+    const dd = $("about-list").querySelectorAll("dd")[index];
+    return `${dt.textContent}: ${dd?.textContent ?? ""}`;
+  }).join("\n");
   try {
-    const info = await getApi().getAppInfo();
-    $("check-updates").textContent = `v${info.version}`;
-    $("check-updates").title = `${info.name} ${info.version} · controleer op updates`;
-    document.title = `${info.name} ${info.version}`;
-    applyUpdateState(await getApi().getUpdateStatus());
+    await navigator.clipboard.writeText(text);
+    toast("Diagnostiek gekopieerd.", "ok");
   } catch {
-    $("check-updates").textContent = "v?";
+    toast("Kopiëren mislukt.", "error");
   }
-})();
-
-$("check-updates").onclick = () => { void checkUpdates(true); };
-$("update-check").onclick = () => { void checkUpdates(true); };
-$("update-download").onclick = async () => {
-  try { applyUpdateState(await getApi().downloadUpdate()); }
-  catch (error) { toast((error as Error).message, "error"); }
-};
-$("update-install").onclick = async () => {
-  try { await getApi().installUpdate(); }
-  catch (error) { toast((error as Error).message, "error"); }
-};
-$("update-later").onclick = () => {
-  $("update-panel").classList.add("hidden");
-  toast("Je kunt later updaten via het versienummer rechtsboven.");
-};
-
-document.querySelectorAll('input[name="processing-mode"]').forEach((input) => input.addEventListener("change", onSettingsChanged));
-for (const id of ["target-mb", "concurrency", "audio-bitrate", "video-codec", "preset", "resolution", "framerate", "keep-audio", "advanced"]) {
-  $(id).addEventListener("change", onSettingsChanged);
-}
-$("target-mb").addEventListener("input", onSettingsChanged);
-
-$("select-button").onclick = async () => {
-  try { await addFiles(await getApi().selectFiles()); }
-  catch (error) { toast((error as Error).message, "error"); }
 };
 
 let dragDepth = 0;
 const dropZone = $("drop-zone");
 window.addEventListener("dragenter", (event) => { event.preventDefault(); dragDepth++; dropZone.classList.add("dragging"); });
-window.addEventListener("dragover", (event) => { event.preventDefault(); if (event.dataTransfer) event.dataTransfer.dropEffect = "copy"; });
+window.addEventListener("dragover", (event) => { event.preventDefault(); });
 window.addEventListener("dragleave", (event) => { event.preventDefault(); dragDepth = Math.max(0, dragDepth - 1); if (dragDepth === 0) dropZone.classList.remove("dragging"); });
 window.addEventListener("drop", (event) => { event.preventDefault(); dragDepth = 0; dropZone.classList.remove("dragging"); void addFiles(filePaths(event.dataTransfer)); });
 
-document.addEventListener("wheel", (event) => {
-  const target = event.target;
-  if (target instanceof HTMLInputElement && target.type === "number" && document.activeElement === target) target.blur();
-}, { passive: true });
-
-$("file-list").addEventListener("change", (event) => {
-  const input = event.target;
-  if (!(input instanceof HTMLInputElement) || !input.classList.contains("item-target")) return;
-  const item = items.get(input.closest<HTMLElement>(".file-card")?.dataset.id ?? "");
-  if (!item) return;
-  const value = Number(input.value);
-  if (!Number.isFinite(value) || value <= 0) {
-    input.value = String(item.settings.targetMb);
-    toast("Doelgrootte moet groter zijn dan 0 MB.", "error");
-    return;
-  }
-  item.settings = { ...item.settings, targetMb: value };
-  item.targetOverridden = true;
-  renderQueue();
+window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+  if (document.body.dataset.theme === "system") applyTheme("system");
 });
 
-$("file-list").addEventListener("click", (event) => {
-  const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-action]");
-  if (!button) return;
-  const item = items.get(button.closest<HTMLElement>(".file-card")?.dataset.id ?? "");
-  if (!item) return;
-  if (button.dataset.action === "remove") removeItems((candidate) => candidate.id === item.id);
-  if (button.dataset.action === "cancel") {
-    getApi().cancelItem(item.id);
-    if (item.status === "queued") {
-      item.status = "cancelled";
-      item.progress = { ...item.progress, status: "cancelled", message: "Geannuleerd" };
-      renderQueue();
-    } else {
-      item.progress = { ...item.progress, message: "Annuleren…" };
-      renderQueue();
-    }
-  }
-  if (button.dataset.action === "retry") {
-    resetQueuedItem(item);
-    renderQueue();
-    if (batchRunning) toast("Dit bestand start mee zodra je de volgende batch start.");
-  }
-  if (button.dataset.action === "open" && item.result) void getApi().openFile(item.result.outputPath).then((error) => { if (error) toast(error, "error"); });
-  if (button.dataset.action === "reveal" && item.result) void getApi().showInFolder(item.result.outputPath);
-  if (button.dataset.action === "save" && item.result) {
-    void getApi().saveCopy(item.result.outputPath).then((saved) => { if (saved) toast("Kopie opgeslagen.", "ok"); }).catch((error: Error) => toast(error.message, "error"));
-  }
+loadPreferences();
+loadHistory();
+updateModeUi();
+renderQueue();
+renderHistory();
+navigate("converter");
+
+void getApi().getAppInfo().then((info) => {
+  appInfo = info;
+  $("sidebar-version").textContent = `v${info.version}`;
+  renderAbout();
+}).catch(() => {
+  $("sidebar-version").textContent = "v?";
 });
 
-$("queue-filters").addEventListener("click", (event) => {
-  const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-filter]");
-  if (!button?.dataset.filter) return;
-  queueFilter = button.dataset.filter as QueueFilter;
-  renderQueue();
+void getApi().ffmpegStatus().then(applyFfmpegStatus).catch((error: Error) => {
+  $("ffmpeg-status").textContent = `Controle mislukt: ${error.message}`;
 });
+void getApi().getUpdateStatus().then(applyUpdateState).catch(() => undefined);
 
-$("reset-targets").onclick = () => {
-  let count = 0;
-  const targetMb = readSettings().targetMb;
-  for (const item of items.values()) {
-    if (item.status === "queued" && item.targetOverridden) {
-      item.targetOverridden = false;
-      item.settings = { ...item.settings, targetMb };
-      count++;
-    }
-  }
-  renderQueue();
-  toast(count ? `${count} doelgroottes teruggezet.` : "Geen afwijkende doelgroottes.", count ? "ok" : "info");
-};
-$("compress-button").onclick = () => { void startBatch().catch((error: Error) => toast(error.message, "error")); };
-$("cancel-button").onclick = () => getApi().cancelBatch();
-$("retry-failed").onclick = () => {
-  let count = 0;
-  for (const item of items.values()) {
-    if (item.status !== "failed" && item.status !== "cancelled") continue;
-    resetQueuedItem(item);
-    count++;
-  }
-  renderQueue();
-  if (!count) toast("Geen mislukte bestanden.");
-  else toast(batchRunning ? `${count} terug in de wachtrij. Ze starten mee bij de volgende batch.` : `${count} terug in de wachtrij.`, "ok");
-};
-$("clear-completed").onclick = () => removeItems((item) => item.status === "completed");
-$("clear-button").onclick = () => { if (!batchRunning) removeItems((item) => item.status !== "running"); };
-if (window.videoCompressor) {
-  window.videoCompressor.onBatchUpdate((update) => {
-    if (dismissed.has(update.item.id)) return;
-    items.set(update.item.id, update.item);
-    renderQueue();
-  });
-  window.videoCompressor.onBinaryStatus(applyFfmpegStatus);
-  window.videoCompressor.onUpdateStatus(applyUpdateState);
-  window.videoCompressor.onFfmpegInstallProgress((percent) => {
-    $<HTMLDetailsElement>("ffmpeg-details").open = true;
-    $("ffmpeg-install").classList.remove("hidden");
-    $("ffmpeg-install-progress").style.width = `${Math.max(0, Math.min(100, percent))}%`;
-  });
-  window.videoCompressor.onBinaryError((message) => { if (ffmpegState === "error") toast(message, "error"); });
-  void getApi().ffmpegStatus().then((status) => {
-    applyFfmpegStatus(status);
-    watchStatus();
-  }).catch((error: Error) => { $("ffmpeg-status").textContent = `Controle mislukt: ${error.message}`; });
-  window.setTimeout(() => {
-    if (ffmpegState !== "checking") return;
-    watchFfmpeg = false;
+window.setInterval(() => {
+  if (ffmpegState === "checking") void getApi().ffmpegStatus().then(applyFfmpegStatus).catch(() => undefined);
+}, 500);
+
+window.setTimeout(() => {
+  if (ffmpegState === "checking") {
     $("ffmpeg-status").textContent = "De controle duurt te lang. Probeer opnieuw.";
-    $<HTMLButtonElement>("ffmpeg-recheck").disabled = false;
-  }, 20_000);
-} else {
-  ffmpegState = "error";
-  $("ffmpeg-panel").classList.remove("is-wait");
-  $("ffmpeg-panel").classList.add("is-bad");
-  $("binary-status").textContent = "Preload ontbreekt";
-  $("binary-status").className = "pill error";
-  $("ffmpeg-status").textContent = "De applicatie-API is niet geladen. Start via Electron.";
-  syncActions();
-}
-
-$("ffmpeg-recheck").onclick = async () => {
-  watchFfmpeg = true;
-  try {
-    applyFfmpegStatus(await getApi().recheckFfmpeg());
-    watchStatus();
-  } catch (error) { toast((error as Error).message, "error"); }
-};
-$("ffmpeg-select").onclick = async () => {
-  try { applyFfmpegStatus(await getApi().selectFfmpeg()); }
-  catch (error) { toast((error as Error).message, "error"); }
-};
-$("ffmpeg-install-button").onclick = async () => {
-  installing = true;
-  $<HTMLButtonElement>("ffmpeg-install-button").disabled = true;
-  $("ffmpeg-install").classList.remove("hidden");
-  try { applyFfmpegStatus(await getApi().installFfmpeg()); }
-  catch (error) { toast((error as Error).message, "error"); }
-  finally {
-    installing = false;
-    $<HTMLButtonElement>("ffmpeg-install-button").disabled = ffmpegReady || ffmpegState === "checking";
-    $<HTMLButtonElement>("ffmpeg-select").disabled = ffmpegState === "checking";
-    $<HTMLButtonElement>("ffmpeg-recheck").disabled = ffmpegState === "checking";
-    syncActions();
   }
-};
+}, 20_000);
+
+if (!window.videoCompressor) {
+  $("ffmpeg-panel").classList.add("is-bad");
+  $("sidebar-ffmpeg").dataset.state = "error";
+  $("sidebar-ffmpeg").textContent = "Preload ontbreekt";
+  $("ffmpeg-status").textContent = "De applicatie-API is niet geladen. Start via Electron.";
+}

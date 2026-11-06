@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, nativeTheme, shell } from "electron";
 import { statSync } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
 import { BatchManager } from "./core/batch-manager";
@@ -6,6 +6,12 @@ import { probeFile } from "./core/probe";
 import { BatchItem } from "./shared/types";
 import { FfmpegProvider } from "./core/ffmpeg-provider";
 import { AppUpdater } from "./core/updater";
+
+type ThemeSource = "system" | "light" | "dark";
+
+function windowBackground(): string {
+  return nativeTheme.shouldUseDarkColors ? "#202020" : "#F3F3F3";
+}
 
 const APP_USER_MODEL_ID = "com.video-compressor.desktop";
 
@@ -36,8 +42,9 @@ function validateBatchItem(item: BatchItem): void {
 
 function createWindow(): BrowserWindow {
   const window = new BrowserWindow({
-    width: 1280, height: 900, minWidth: 1000, minHeight: 680,
-    backgroundColor: "#070b14",
+    width: 1280, height: 900, minWidth: 1100, minHeight: 700,
+    backgroundColor: windowBackground(),
+    show: false,
     webPreferences: {
       preload: join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -45,6 +52,7 @@ function createWindow(): BrowserWindow {
       sandbox: false
     }
   });
+  window.once("ready-to-show", () => window.show());
   window.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL) => {
     console.error(`[Renderer] Failed to load (${errorCode}): ${errorDescription} - ${validatedURL}`);
   });
@@ -79,8 +87,23 @@ app.whenReady().then(() => {
     version: app.getVersion(),
     packaged: app.isPackaged,
     userData: app.getPath("userData"),
-    appDirectory: appDirectory()
+    appDirectory: appDirectory(),
+    electron: process.versions.electron
   }));
+  ipcMain.handle("get-theme-source", () => nativeTheme.themeSource as ThemeSource);
+  ipcMain.handle("set-theme-source", (_event, source: ThemeSource) => {
+    if (source !== "system" && source !== "light" && source !== "dark") throw new Error("Ongeldige thema-instelling.");
+    nativeTheme.themeSource = source;
+    for (const browserWindow of BrowserWindow.getAllWindows()) {
+      browserWindow.setBackgroundColor(windowBackground());
+    }
+    return nativeTheme.themeSource as ThemeSource;
+  });
+  nativeTheme.on("updated", () => {
+    for (const browserWindow of BrowserWindow.getAllWindows()) {
+      browserWindow.setBackgroundColor(windowBackground());
+    }
+  });
   ipcMain.handle("update-status", () => updater.getState());
   ipcMain.handle("update-check", () => updater.check());
   ipcMain.handle("update-download", () => updater.download());
@@ -124,6 +147,7 @@ app.whenReady().then(() => {
       sendBinaryStatus();
     }
     if (!provider.getStatus().available) throw new Error("FFmpeg/FFprobe zijn niet beschikbaar. Configureer eerst FFmpeg in Instellingen.");
+    const ffmpegStatus = provider.getStatus();
     const preparedItems = await Promise.all(items.map(async (item) => {
       try {
         if (!item?.id) throw new Error("Ongeldig batchitem.");
@@ -131,6 +155,9 @@ app.whenReady().then(() => {
         const metadata = await probeFile(provider.getFfprobePath(), item.inputPath);
         const prepared: BatchItem = { ...item, metadata, status: "queued", error: undefined };
         validateBatchItem(prepared);
+        if (prepared.settings.videoCodec === "h265" && !ffmpegStatus.codecs.h265) {
+          throw new Error("H.265 (libx265) is niet beschikbaar in de huidige FFmpeg-installatie. Kies H.264.");
+        }
         return prepared;
       } catch (error) {
         const message = error instanceof Error ? error.message : "Bestand kon niet worden voorbereid.";

@@ -1,11 +1,18 @@
 import { copyFileSync, existsSync, mkdtempSync, renameSync, rmSync, statSync, unlinkSync } from "node:fs";
-import { join, parse } from "node:path";
+import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { calculateVideoBitrateKbps, resolutionFilter } from "./bitrate";
+import { OutputPathAllocator } from "./output-paths";
 import { ManagedProcess } from "./process";
 import { CompressionProgress, CompressionResult, CompressionSettings, VideoMetadata } from "../shared/types";
 
 type ProgressCallback = (progress: CompressionProgress) => void;
+
+export interface CompressOptions {
+  outputDirectory?: string;
+  /** Shared allocator for concurrent jobs in the same batch. */
+  outputAllocator?: OutputPathAllocator;
+}
 
 export class Compressor {
   private activeProcess: ManagedProcess | null = null;
@@ -22,13 +29,14 @@ export class Compressor {
     metadata: VideoMetadata,
     settings: CompressionSettings,
     onProgress: ProgressCallback,
-    outputDirectory?: string,
+    options: CompressOptions = {},
   ): Promise<CompressionResult> {
     if (!existsSync(inputPath)) throw new Error("Het invoerbestand bestaat niet meer.");
     if (settings.mode === "compress" && settings.targetMb <= 0) throw new Error("Doelgrootte moet groter zijn dan 0 MB.");
     this.cancelled = false;
 
-    const finalPath = this.uniqueOutputPath(inputPath, outputDirectory);
+    const allocator = options.outputAllocator ?? new OutputPathAllocator();
+    let reservedPath = allocator.reserveFromInput(inputPath, options.outputDirectory);
     const originalBytes = statSync(inputPath).size;
     const workDir = mkdtempSync(join(tmpdir(), "vc-work-"));
     const tempOutput = join(workDir, "output.mp4");
@@ -56,14 +64,31 @@ export class Compressor {
         if (!success) throw new Error("FFmpeg kon de ingestelde maximale bestandsgrootte niet bereiken.");
       }
 
+      if (this.cancelled) throw new Error("Conversie geannuleerd.");
+      if (!existsSync(tempOutput)) throw new Error("Het tijdelijke uitvoerbestand ontbreekt na encoding.");
+
       onProgress({ status: "encoding", percent: 99, speed: "", etaSeconds: null, bitrate: "", message: "MP4 wordt opgeslagen naast het bronbestand" });
-      moveFile(tempOutput, finalPath);
-      const outputBytes = statSync(finalPath).size;
-      return { inputPath, outputPath: finalPath, originalBytes, outputBytes, duration: metadata.duration, videoBitrateKbps, settings, metadata };
+      try {
+        reservedPath = allocator.ensureStillAvailable(reservedPath, inputPath, options.outputDirectory);
+      } catch (error) {
+        throw new Error(
+          `Uitvoerbestand kon niet veilig worden aangemaakt: ${error instanceof Error ? error.message : String(error)}`
+        );
+      }
+      if (existsSync(reservedPath)) {
+        throw new Error(`Uitvoerbestand kon niet veilig worden aangemaakt: "${reservedPath}" bestaat al.`);
+      }
+      moveFile(tempOutput, reservedPath);
+      if (!existsSync(reservedPath)) {
+        throw new Error(`Uitvoerbestand kon niet veilig worden aangemaakt: verplaatsen naar "${reservedPath}" is mislukt.`);
+      }
+      const outputBytes = statSync(reservedPath).size;
+      return { inputPath, outputPath: reservedPath, originalBytes, outputBytes, duration: metadata.duration, videoBitrateKbps, settings, metadata };
     } catch (error) {
       rmSync(tempOutput, { force: true });
-      throw improveIoError(error, finalPath);
+      throw improveIoError(error, reservedPath);
     } finally {
+      allocator.release(reservedPath);
       cleanupWorkDir(workDir);
       this.activeProcess = null;
     }
@@ -153,18 +178,9 @@ export class Compressor {
       process.on("close", (code: number | null) => {
         if (this.cancelled) reject(new Error("Conversie geannuleerd."));
         else if (code === 0) resolve();
-        else reject(new Error(`FFmpeg is gestopt met exitcode ${code}. ${errorOutput.slice(-1000)}`));
+        else reject(new Error(translateFfmpegFailure(code, errorOutput)));
       });
     });
-  }
-
-  private uniqueOutputPath(inputPath: string, outputDirectory?: string): string {
-    const parsed = parse(inputPath);
-    const directory = outputDirectory ?? parsed.dir;
-    let candidate = join(directory, `${parsed.name}.mp4`);
-    let index = 1;
-    while (existsSync(candidate)) candidate = join(directory, `${parsed.name} (${index++}).mp4`);
-    return candidate;
   }
 }
 
@@ -183,6 +199,17 @@ function moveFile(from: string, to: string): void {
     copyFileSync(from, to);
     unlinkSync(from);
   }
+}
+
+function translateFfmpegFailure(code: number | null, errorOutput: string): string {
+  const tail = errorOutput.slice(-1000);
+  if (/Unknown encoder ['"]?libx265/i.test(errorOutput)) {
+    return `H.265 (libx265) wordt niet ondersteund door deze FFmpeg-installatie. Kies H.264 of installeer een FFmpeg-build met libx265. ${tail}`;
+  }
+  if (/Permission denied|No such file or directory|Invalid argument/i.test(errorOutput)) {
+    return `FFmpeg kon het bestand niet verwerken (exitcode ${code}). ${tail}`;
+  }
+  return `FFmpeg is gestopt met exitcode ${code}. ${tail}`;
 }
 
 function improveIoError(error: unknown, finalPath: string): Error {

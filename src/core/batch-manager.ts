@@ -1,4 +1,5 @@
 import { Compressor } from "./compressor";
+import { OutputPathAllocator } from "./output-paths";
 import { BatchItem, BatchUpdate, CompressionProgress } from "../shared/types";
 
 export type BatchListener = (update: BatchUpdate) => void;
@@ -9,6 +10,7 @@ export class BatchManager {
   private cancelled = false;
   private running = false;
   private listener: BatchListener | null = null;
+  private readonly outputAllocator = new OutputPathAllocator();
 
   constructor(private readonly ffmpegPath: string, private readonly concurrency = 1) {
     if (!Number.isInteger(concurrency) || concurrency < 1) throw new Error("Paralleliteit moet minstens 1 zijn.");
@@ -19,6 +21,7 @@ export class BatchManager {
     this.running = true;
     this.listener = listener;
     this.cancelled = false;
+    this.outputAllocator.clear();
     this.items = new Map(items.map((item) => [
       item.id,
       item.status === "failed" || item.status === "cancelled" ? { ...item } : { ...item, status: "queued" }
@@ -31,6 +34,7 @@ export class BatchManager {
       this.running = false;
       this.active.clear();
       this.listener = null;
+      this.outputAllocator.clear();
     }
   }
 
@@ -40,7 +44,7 @@ export class BatchManager {
   }
 
   cancelItem(id: string): void {
-    this.items.get(id) && this.active.get(id)?.cancel();
+    this.active.get(id)?.cancel();
     const item = this.items.get(id);
     if (item?.status === "queued") {
       item.status = "cancelled";
@@ -49,22 +53,42 @@ export class BatchManager {
     }
   }
 
+  private claimNext(): BatchItem | null {
+    for (const item of this.items.values()) {
+      if (item.status !== "queued") continue;
+      item.status = "running";
+      return item;
+    }
+    return null;
+  }
+
   private async worker(listener: BatchListener): Promise<void> {
     while (!this.cancelled) {
-      const item = [...this.items.values()].find((candidate) => candidate.status === "queued");
+      const item = this.claimNext();
       if (!item) return;
-      item.status = "running";
       this.emit(listener, item);
       const compressor = new Compressor();
       this.active.set(item.id, compressor);
       try {
-        // MP4 altijd naast het bronbestand, zonder aparte uitvoermap.
-        item.result = await compressor.compress(this.ffmpegPath, item.inputPath, item.metadata, item.settings, (progress) => {
-          item.progress = progress;
-          this.emit(listener, item);
-        });
-        item.status = "completed";
-        item.progress = this.progress("completed", "Voltooid", 100);
+        item.result = await compressor.compress(
+          this.ffmpegPath,
+          item.inputPath,
+          item.metadata,
+          item.settings,
+          (progress) => {
+            item.progress = progress;
+            this.emit(listener, item);
+          },
+          { outputAllocator: this.outputAllocator }
+        );
+        if (!item.result?.outputPath) {
+          item.status = "failed";
+          item.error = "Uitvoerbestand ontbreekt na verwerking.";
+          item.progress = this.progress("error", item.error);
+        } else {
+          item.status = "completed";
+          item.progress = this.progress("completed", "Voltooid", 100);
+        }
       } catch (error) {
         const message = (error as Error).message;
         item.status = message.includes("geannuleerd") ? "cancelled" : "failed";

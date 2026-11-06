@@ -4,6 +4,7 @@ import { readdir } from "node:fs/promises";
 import { dirname, join, normalize, relative, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { spawn } from "node:child_process";
+import { parseEncoderSupport } from "./app-storage";
 
 const RELEASE_VERSION = "9.0.2";
 const DOWNLOAD_URL = `https://github.com/GyanD/codexffmpeg/releases/download/${RELEASE_VERSION}/ffmpeg-${RELEASE_VERSION}-full_build-shared.zip`;
@@ -240,17 +241,44 @@ export class FfmpegProvider {
       const encoderText = `${encoderOutput.stdout}\n${encoderOutput.stderr}`;
       const version = versionText.match(/ffmpeg version\s+([^\s]+)/)?.[1] ?? null;
       const major = version ? Number(version.split(".")[0]) : 0;
-      const codecs = {
-        h264: /\blibx264\b/.test(encoderText),
-        h265: /\blibx265\b/.test(encoderText),
-        aac: /\baac\b/.test(encoderText)
-      };
+
+      if (!versionResult.ok && !probeResult.ok) {
+        return {
+          ...this.emptyStatus(directory ? "De geselecteerde FFmpeg-installatie is ongeldig." : "FFmpeg en FFprobe zijn niet gevonden."),
+          state: "missing",
+          location: directory ?? null
+        };
+      }
+      if (!versionResult.ok) {
+        return { ...this.emptyStatus("ffmpeg.exe kon niet worden uitgevoerd."), state: "invalid", ffprobe: probeResult.ok, location: directory ?? null };
+      }
+      if (!probeResult.ok) {
+        return { ...this.emptyStatus("ffprobe.exe kon niet worden uitgevoerd."), state: "invalid", ffmpeg: true, version, location: directory ?? null };
+      }
+      if (!encoderResult.ok) {
+        return {
+          ...this.emptyStatus("Encoderlijst kon niet worden opgevraagd. Controleer of ffmpeg.exe correct werkt."),
+          state: "invalid",
+          ffmpeg: true,
+          ffprobe: true,
+          version,
+          location: directory ?? null
+        };
+      }
+
+      const codecs = parseEncoderSupport(encoderText);
       const available = Boolean(version && major >= MIN_MAJOR && probeText.includes("ffprobe") && codecs.h264 && codecs.aac);
-      const message = available ? "FFmpeg en FFprobe zijn gereed." :
-        !versionResult.ok && !probeResult.ok ? (directory ? "De geselecteerde FFmpeg-installatie is ongeldig." : "FFmpeg en FFprobe zijn niet gevonden.") :
-        !versionResult.ok ? "ffmpeg.exe kon niet worden uitgevoerd." :
-        !probeResult.ok ? "ffprobe.exe kon niet worden uitgevoerd." : "FFmpeg mist een vereiste versie of codec.";
-      return { state: available ? "available" : "invalid", available, ffmpeg: versionResult.ok, ffprobe: probeResult.ok, version, location: directory ?? null, codecs, message };
+      let message: string;
+      if (available) {
+        message = codecs.h265
+          ? "FFmpeg en FFprobe zijn gereed."
+          : "FFmpeg en FFprobe zijn gereed. H.265 (libx265) ontbreekt; alleen H.264 is beschikbaar.";
+      } else if (!codecs.h264 || !codecs.aac) {
+        message = "FFmpeg mist een vereiste encoder (libx264 en/of AAC).";
+      } else {
+        message = "FFmpeg mist een vereiste versie of codec.";
+      }
+      return { state: available ? "available" : "invalid", available, ffmpeg: true, ffprobe: true, version, location: directory ?? null, codecs, message };
     } catch {
       const ffmpegOk = versionResult.ok;
       const ffprobeOk = probeResult.ok;
