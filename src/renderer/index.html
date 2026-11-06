@@ -161,13 +161,38 @@
                   <label id="codec-field">Videocodec
                     <select id="video-codec"><option value="h264" selected>H.264</option><option value="h265">H.265</option></select>
                   </label>
+                  <label id="encoder-field">Encoder
+                    <select id="encoder-preference">
+                      <option value="auto" selected>Automatisch</option>
+                      <option value="cpu">CPU</option>
+                      <option value="nvidia">NVIDIA</option>
+                      <option value="intel">Intel</option>
+                      <option value="amd">AMD</option>
+                    </select>
+                  </label>
                   <label id="preset-field">Preset
-                    <select id="preset"><option>ultrafast</option><option>fast</option><option selected>medium</option><option>slow</option></select>
+                    <select id="preset">
+                      <option value="ultrafast">ultrafast</option>
+                      <option value="veryfast">veryfast</option>
+                      <option value="faster">faster</option>
+                      <option value="fast">fast</option>
+                      <option value="medium" selected>medium</option>
+                      <option value="slow">slow</option>
+                    </select>
                   </label>
                   <label id="concurrency-field">Tegelijk
-                    <input id="concurrency" type="number" min="1" max="8" step="1" value="1" inputmode="numeric">
+                    <select id="concurrency">
+                      <option value="0">Auto</option>
+                      <option value="1" selected>1</option>
+                      <option value="2">2</option>
+                      <option value="3">3</option>
+                      <option value="4">4</option>
+                      <option value="6">6</option>
+                      <option value="8">8</option>
+                    </select>
                   </label>
                 </div>
+                <p id="encoder-hint" class="muted">Automatisch kiest de snelste bruikbare hardware-encoder, anders CPU.</p>
                 <p id="convert-note" class="muted hidden">Eerst stream copy; bij mislukken volgt H.264/AAC.</p>
 
                 <details id="advanced-toggle" class="advanced">
@@ -245,8 +270,36 @@
                 <label>Doelgrootte (MB)<input id="settings-target-mb" type="number" min="1" step="1" value="50"></label>
                 <label>Audio (kbps)<select id="settings-audio"><option>96</option><option selected>128</option><option>160</option><option>192</option></select></label>
                 <label>Videocodec<select id="settings-codec"><option value="h264" selected>H.264</option><option value="h265">H.265</option></select></label>
-                <label>Preset<select id="settings-preset"><option>ultrafast</option><option>fast</option><option selected>medium</option><option>slow</option></select></label>
-                <label>Paralleliteit<input id="settings-concurrency" type="number" min="1" max="8" step="1" value="1"></label>
+                <label>Encoder
+                  <select id="settings-encoder">
+                    <option value="auto" selected>Automatisch</option>
+                    <option value="cpu">CPU</option>
+                    <option value="nvidia">NVIDIA</option>
+                    <option value="intel">Intel</option>
+                    <option value="amd">AMD</option>
+                  </select>
+                </label>
+                <label>Preset
+                  <select id="settings-preset">
+                    <option value="ultrafast">ultrafast</option>
+                    <option value="veryfast">veryfast</option>
+                    <option value="faster">faster</option>
+                    <option value="fast">fast</option>
+                    <option value="medium" selected>medium</option>
+                    <option value="slow">slow</option>
+                  </select>
+                </label>
+                <label>Paralleliteit
+                  <select id="settings-concurrency">
+                    <option value="0">Auto</option>
+                    <option value="1" selected>1</option>
+                    <option value="2">2</option>
+                    <option value="3">3</option>
+                    <option value="4">4</option>
+                    <option value="6">6</option>
+                    <option value="8">8</option>
+                  </select>
+                </label>
                 <label>Resolutie<select id="settings-resolution"><option value="original">Origineel</option><option>1080p</option><option>720p</option><option>480p</option></select></label>
                 <label>Framerate<select id="settings-framerate"><option value="original">Origineel</option><option>24</option><option>25</option><option>30</option><option>60</option></select></label>
                 <label class="check"><input id="settings-keep-audio" type="checkbox" checked><span>Audio behouden</span></label>

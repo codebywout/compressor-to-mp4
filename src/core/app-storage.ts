@@ -6,6 +6,7 @@ export interface StoredPreferences {
   concurrency?: number;
   audioBitrate?: string;
   videoCodec?: string;
+  encoderPreference?: string;
   preset?: string;
   resolution?: string;
   frameRate?: string;
@@ -28,7 +29,8 @@ export interface StoredHistoryEntry {
 
 const AUDIO = new Set(["96", "128", "160", "192"]);
 const CODECS = new Set(["h264", "h265"]);
-const PRESETS = new Set(["ultrafast", "fast", "medium", "slow"]);
+const ENCODERS = new Set(["auto", "cpu", "nvidia", "intel", "amd"]);
+const PRESETS = new Set(["ultrafast", "veryfast", "faster", "fast", "medium", "slow"]);
 const RESOLUTIONS = new Set(["original", "1080p", "720p", "480p"]);
 const FRAMERATES = new Set(["original", "24", "25", "30", "60"]);
 
@@ -43,10 +45,13 @@ export function parsePreferencesJson(raw: string | null): StoredPreferences | nu
       preferences.targetMb = value.targetMb;
     }
     if (typeof value.concurrency === "number" && Number.isInteger(value.concurrency)) {
-      preferences.concurrency = Math.min(8, Math.max(1, value.concurrency));
+      preferences.concurrency = Math.min(8, Math.max(0, value.concurrency));
     }
     if (typeof value.audioBitrate === "string" && AUDIO.has(value.audioBitrate)) preferences.audioBitrate = value.audioBitrate;
     if (typeof value.videoCodec === "string" && CODECS.has(value.videoCodec)) preferences.videoCodec = value.videoCodec;
+    if (typeof value.encoderPreference === "string" && ENCODERS.has(value.encoderPreference)) {
+      preferences.encoderPreference = value.encoderPreference;
+    }
     if (typeof value.preset === "string" && PRESETS.has(value.preset)) preferences.preset = value.preset;
     if (typeof value.resolution === "string" && RESOLUTIONS.has(value.resolution)) preferences.resolution = value.resolution;
     if (typeof value.frameRate === "string" && FRAMERATES.has(value.frameRate)) preferences.frameRate = value.frameRate;

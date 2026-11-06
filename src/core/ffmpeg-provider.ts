@@ -5,6 +5,7 @@ import { dirname, join, normalize, relative, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { spawn } from "node:child_process";
 import { parseEncoderSupport } from "./app-storage";
+import { EMPTY_HARDWARE, HardwareCapabilities, parseHardwareListed } from "./encoders";
 
 const RELEASE_VERSION = "9.0.2";
 const DOWNLOAD_URL = `https://github.com/GyanD/codexffmpeg/releases/download/${RELEASE_VERSION}/ffmpeg-${RELEASE_VERSION}-full_build-shared.zip`;
@@ -28,6 +29,8 @@ export interface FfmpegStatus {
   version: string | null;
   location: string | null;
   codecs: { h264: boolean; h265: boolean; aac: boolean };
+  /** Encoders that were listed AND successfully probed on this machine. */
+  hardware: HardwareCapabilities;
   message: string;
 }
 
@@ -267,24 +270,67 @@ export class FfmpegProvider {
       }
 
       const codecs = parseEncoderSupport(encoderText);
+      const listed = parseHardwareListed(encoderText);
       const available = Boolean(version && major >= MIN_MAJOR && probeText.includes("ffprobe") && codecs.h264 && codecs.aac);
+      const hardware = available
+        ? await this.probeHardware(ffmpeg, listed)
+        : { ...EMPTY_HARDWARE };
       let message: string;
       if (available) {
-        message = codecs.h265
+        const hwBits = [
+          hardware.nvidia.h264 || hardware.nvidia.h265 ? "NVIDIA" : null,
+          hardware.amd.h264 || hardware.amd.h265 ? "AMD" : null,
+          hardware.intel.h264 || hardware.intel.h265 ? "Intel" : null
+        ].filter(Boolean);
+        const hwNote = hwBits.length ? ` Hardware: ${hwBits.join(", ")}.` : " Geen bruikbare hardware-encoder gevonden; CPU wordt gebruikt.";
+        message = (codecs.h265
           ? "FFmpeg en FFprobe zijn gereed."
-          : "FFmpeg en FFprobe zijn gereed. H.265 (libx265) ontbreekt; alleen H.264 is beschikbaar.";
+          : "FFmpeg en FFprobe zijn gereed. H.265 (libx265) ontbreekt; alleen H.264 is beschikbaar.") + hwNote;
       } else if (!codecs.h264 || !codecs.aac) {
         message = "FFmpeg mist een vereiste encoder (libx264 en/of AAC).";
       } else {
         message = "FFmpeg mist een vereiste versie of codec.";
       }
-      return { state: available ? "available" : "invalid", available, ffmpeg: true, ffprobe: true, version, location: directory ?? null, codecs, message };
+      return { state: available ? "available" : "invalid", available, ffmpeg: true, ffprobe: true, version, location: directory ?? null, codecs, hardware, message };
     } catch {
       const ffmpegOk = versionResult.ok;
       const ffprobeOk = probeResult.ok;
       const message = !ffmpegOk && !ffprobeOk ? (directory ? "De geselecteerde FFmpeg-installatie is ongeldig." : "FFmpeg en FFprobe zijn niet gevonden.") : !ffmpegOk ? "ffmpeg.exe kon niet worden uitgevoerd." : "ffprobe.exe kon niet worden uitgevoerd.";
       return { ...this.emptyStatus(message), state: ffmpegOk || ffprobeOk ? "invalid" : "missing", ffmpeg: ffmpegOk, ffprobe: ffprobeOk, location: directory ?? null };
     }
+  }
+
+  /** Probe listed HW encoders with a 1-frame encode; listing alone is not enough. */
+  private async probeHardware(ffmpegPath: string, listed: HardwareCapabilities): Promise<HardwareCapabilities> {
+    const result: HardwareCapabilities = {
+      nvidia: { h264: false, h265: false },
+      intel: { h264: false, h265: false },
+      amd: { h264: false, h265: false }
+    };
+    const probes: Array<{ family: keyof HardwareCapabilities; codec: "h264" | "h265"; encoder: string }> = [
+      { family: "nvidia", codec: "h264", encoder: "h264_nvenc" },
+      { family: "nvidia", codec: "h265", encoder: "hevc_nvenc" },
+      { family: "amd", codec: "h264", encoder: "h264_amf" },
+      { family: "amd", codec: "h265", encoder: "hevc_amf" },
+      { family: "intel", codec: "h264", encoder: "h264_qsv" },
+      { family: "intel", codec: "h265", encoder: "hevc_qsv" }
+    ];
+    for (const probe of probes) {
+      if (!listed[probe.family][probe.codec]) continue;
+      log(`Probing hardware encoder: ${probe.encoder}`);
+      const nullTarget = process.platform === "win32" ? "NUL" : "/dev/null";
+      const check = await this.runCommand(ffmpegPath, [
+        "-hide_banner", "-loglevel", "error",
+        "-f", "lavfi", "-i", "testsrc=size=128x72:rate=1",
+        "-frames:v", "1",
+        "-pix_fmt", "yuv420p",
+        "-c:v", probe.encoder,
+        "-f", "null", nullTarget
+      ], 20_000);
+      result[probe.family][probe.codec] = check.ok;
+      log(`Probe ${probe.encoder}: ${check.ok ? "usable" : "unavailable"}`);
+    }
+    return result;
   }
 
   private async execute(command: string, args: string[], timeoutMs = 15_000): Promise<{ ok: boolean; output: { stdout: string; stderr: string } }> {
@@ -346,6 +392,16 @@ export class FfmpegProvider {
   }
 
   private emptyStatus(message: string): FfmpegStatus {
-    return { state: "error", available: false, ffmpeg: false, ffprobe: false, version: null, location: null, codecs: { h264: false, h265: false, aac: false }, message };
+    return {
+      state: "error",
+      available: false,
+      ffmpeg: false,
+      ffprobe: false,
+      version: null,
+      location: null,
+      codecs: { h264: false, h265: false, aac: false },
+      hardware: { ...EMPTY_HARDWARE },
+      message
+    };
   }
 }

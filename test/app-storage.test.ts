@@ -16,7 +16,7 @@ test("parses valid preferences and clamps concurrency", () => {
     advanced: false,
     theme: "dark"
   }));
-  assert.equal(preferences?.concurrency, 8);
+  assert.equal(preferences?.concurrency, 8); // clamped from 99
   assert.equal(preferences?.theme, "dark");
   assert.equal(preferences?.videoCodec, "h264");
 });

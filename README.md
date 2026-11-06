@@ -1,6 +1,6 @@
 # Video Compressor
 
-Een desktopapplicatie voor het comprimeren van `.ts`-video's naar MP4 met een maximale doelgrootte.
+Een desktopapplicatie voor het comprimeren van video's (o.a. `.ts`, `.mp4`, `.mov`, `.mkv`) naar MP4 met een maximale doelgrootte. Versie **1.3.0** voegt hardware-encoding (NVIDIA NVENC, AMD AMF, Intel QSV), automatische encoderselectie, adaptieve paralleliteit en een lichtere-jobs-eerst scheduler toe.
 
 ## Installatie
 
@@ -22,11 +22,11 @@ npm run build
 npm run dist
 ```
 
-`npm run dist` maakt een schone Windows NSIS-installer in de map `release`, bijvoorbeeld `Video-Compressor-1.2.0-Setup.exe`. De installer toont het versienummer in het installatieprogramma en onder **Apps en onderdelen** als `Video Compressor 1.2.0`. Bij deïnstallatie verdwijnen programma (inclusief lokaal gedownloade FFmpeg), snelkoppelingen en registervermeldingen.
+`npm run dist` maakt een schone Windows NSIS-installer in de map `release`, bijvoorbeeld `Video-Compressor-1.3.0-Setup.exe`. De installer toont het versienummer in het installatieprogramma en onder **Apps en onderdelen** als `Video Compressor 1.3.0`. Bij deïnstallatie verdwijnen programma (inclusief lokaal gedownloade FFmpeg), snelkoppelingen en registervermeldingen. Bij een **update** blijven snelkoppelingen en gebruikersinstellingen behouden.
 
 De installer gebruikt het icoon uit `build/icon.ico` (bron: `assets/icon.svg`). FFmpeg wordt niet meegebundeld; bij automatische installatie belandt het rechtstreeks in de app-map (naast `VideoCompressor.exe`, of in de projectmap tijdens ontwikkeling) als `ffmpeg/` + `ffmpeg.json`.
 
-De applicatie gebruikt FFmpeg met H.264 en AAC, twee-pass encoding, `+faststart` en een veiligheidsmarge. Als een resultaat toch groter is dan de doelgrootte, wordt automatisch maximaal twee keer met een lagere videobitrate opnieuw gecodeerd. Originele bestanden worden nooit overschreven.
+De applicatie gebruikt FFmpeg met H.264/H.265 en AAC. CPU-encoding doet two-pass; hardware-encoders doen single-pass met retries tot de limiet. Auto kiest bij voorkeur NVENC (kwaliteit + snelheid); AMD AMF blijft handmatig beschikbaar. Paralleliteit kan handmatig (1–8) of automatisch. Originele bestanden worden nooit overschreven. Orphaned tijdelijke `vc-work-*`-mappen worden bij start opgeruimd.
 
 ## GitHub Releases en automatische updates
 
@@ -49,15 +49,15 @@ Updates werken alleen in de **geïnstalleerde** app, niet via `npm start`.
 npm run dist
 ```
 
-Verspreid `release\Video-Compressor-1.2.0-Setup.exe` (of de huidige versie). Publiceer die ook als GitHub Release (zie hieronder), zodat latere updates een startpunt hebben.
+Verspreid `release\Video-Compressor-1.3.0-Setup.exe` (of de huidige versie). Publiceer die ook als GitHub Release (zie hieronder), zodat latere updates een startpunt hebben.
 
 ### Nieuwe versie uitbrengen (geen nieuwe installer rondsturen)
 
 ```powershell
 npm run bump -- patch
 git add -A
-git commit -m "Release v1.2.1"
-git tag v1.2.1
+git commit -m "Release v1.3.1"
+git tag v1.3.1
 git push origin HEAD --tags
 ```
 
@@ -83,7 +83,7 @@ npm run release -- patch --publish
 
 ## Gebruik
 
-Voeg bestanden toe via de bestandskiezer of drag-and-drop, ook buiten het sleepvlak. Selecteer een modus. **Comprimeren** gebruikt de ingestelde maximale grootte. **Converteren** probeert eerst stream-copy zonder hercodering; als de streams niet geschikt zijn voor de MP4-container, valt de applicatie automatisch terug op H.264/AAC. De MP4 wordt altijd in dezelfde map als het bronbestand gezet (`video.ts` → `video.mp4`); bestaat die naam al, dan wordt `video (1).mp4` gebruikt. Er is geen aparte uitvoermap. Start gebruikt de instellingen in het zijpaneel voor alle wachtende bestanden. Een doelgrootte die je op een bestand wijzigt, blijft voor dat bestand gelden tot je **Afwijkende doelgroottes wissen** kiest. Voltooide bestanden worden niet opnieuw verwerkt; gebruik **Opnieuw** op een kaart. Een lopend bestand annuleer je apart, of je stopt de hele batch. Een bestand dat bij de start niet gelezen kan worden, wordt alleen zelf als fout gemarkeerd. Stel gelijktijdige taken bij voorkeur op `1`; hogere waarden gebruiken meer CPU, RAM en schijfruimte.
+Voeg bestanden toe via de bestandskiezer of drag-and-drop, ook buiten het sleepvlak. Selecteer een modus. **Comprimeren** gebruikt de ingestelde maximale grootte. **Converteren** probeert eerst stream-copy zonder hercodering; als de streams niet geschikt zijn voor de MP4-container, valt de applicatie automatisch terug op H.264/AAC. De MP4 wordt altijd in dezelfde map als het bronbestand gezet (`video.ts` → `video.mp4`); bestaat die naam al, dan wordt `video (1).mp4` gebruikt. Er is geen aparte uitvoermap. Start gebruikt de instellingen in het zijpaneel voor alle wachtende bestanden. Een doelgrootte die je op een bestand wijzigt, blijft voor dat bestand gelden tot je **Afwijkende doelgroottes wissen** kiest. Voltooide bestanden worden niet opnieuw verwerkt; gebruik **Opnieuw** op een kaart. Een lopend bestand annuleer je apart, of je stopt de hele batch. Een bestand dat bij de start niet gelezen kan worden, wordt alleen zelf als fout gemarkeerd. Kies **Auto** voor paralleliteit tenzij je handmatig wilt fine-tunen (1–8). Hogere waarden gebruiken meer CPU, RAM, VRAM en schijfruimte.
 
 Bij het ontbreken van FFmpeg verschijnt bovenaan de installatiekaart. **Automatisch installeren** downloadt FFmpeg 9.0.2 vanaf de gecontroleerde GyanD GitHub-release, controleert SHA-256, valideert het archief en wijzigt de globale Windows PATH niet. **Installatie kiezen** laat je een bestaande map met `ffmpeg.exe` en `ffprobe.exe` selecteren. De gekozen locatie wordt opgeslagen in de user-configuratie. Bij een bestaande Windows-installatie wordt `where.exe` gebruikt om de werkelijke PATH-locaties te vinden. Als FFmpeg via WinGet is geïnstalleerd maar nog niet in de PATH van het proces staat, wordt ook de lokale `Gyan.FFmpeg`-pakketmap gecontroleerd en na succesvolle validatie opgeslagen. Alleen een map waarin beide programma's aanwezig zijn wordt geaccepteerd. De standaard `node_modules/electron/dist/resources/ffmpeg`-map wordt niet als FFmpeg-installatie verondersteld.
 
@@ -94,7 +94,7 @@ De doelgrootte is een maximum. Door MP4-container-overhead, zeer korte video's, 
 ## Bekende beperkingen
 
 - FFmpeg/FFprobe worden niet meegebundeld. Dit voorkomt distributie van een GPL-build zonder afzonderlijke licentie- en compliancecontrole. De automatische download gebruikt de door GyanD gepubliceerde build en SHA-256-hash; controleer de FFmpeg-licentievoorwaarden bij verdere distributie.
-- De releasevalidatie is uitgevoerd met echte FFmpeg 9.0.2-testmedia: TS met en zonder audio, verschillende resoluties/framerates en MP4-invoer. De doelgroottes 5, 10, 25, 50 en 100 MB bleven onder de limiet.
+- De releasevalidatie (v1.3.0) is uitgevoerd met publieke sampleclips én representatieve gegenereerde media (1080p/4K, H.264/H.265, TS, speciale bestandsnamen). Auto blijft NVENC: AMF kan sneller zijn, maar meetbaar lagere SSIM/VMAF. Zeer strakke limieten kunnen op hardware-encoders onhaalbaar zijn; dat wordt als fout gemeld zonder corrupte output.
 - Een extreem kleine, technisch onhaalbare doelgrootte wordt als fout gemarkeerd; er wordt geen misleidend succesvol resultaat gerapporteerd.
 - `npm install` kan transitive advisories tonen vanuit Electron/Electron Builder. Controleer deze vóór distributie met `npm audit`; de packagingtooling is alleen als ontwikkeldependency opgenomen.
 - `npm audit` meldt momenteel 6 moderate advisories in de `electron-builder`-dependencyboom rond `minimatch`. De voorgestelde automatische fix forceert een downgrade naar electron-builder 25.1.0 en is daarom niet toegepast.

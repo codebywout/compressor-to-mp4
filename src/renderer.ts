@@ -15,6 +15,7 @@ interface Preferences {
   concurrency?: number;
   audioBitrate?: string;
   videoCodec?: string;
+  encoderPreference?: string;
   preset?: string;
   resolution?: string;
   frameRate?: string;
@@ -51,6 +52,7 @@ const historyEntries: HistoryEntry[] = [];
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
 let batchRunning = false;
+let lastBatchRuntime: import("./shared/types").BatchRuntimeInfo | null = null;
 let queueFilter: QueueFilter = "all";
 let ffmpegReady = false;
 let ffmpegState: FfmpegStatus["state"] = "checking";
@@ -127,8 +129,15 @@ function readSettings(): CompressionSettings {
     resolution: $<HTMLSelectElement>("resolution").value as CompressionSettings["resolution"],
     frameRate: frame === "original" ? "original" : Number(frame),
     preset: $<HTMLSelectElement>("preset").value as CompressionSettings["preset"],
-    keepAudio: $<HTMLInputElement>("keep-audio").checked
+    keepAudio: $<HTMLInputElement>("keep-audio").checked,
+    encoderPreference: $<HTMLSelectElement>("encoder-preference").value as CompressionSettings["encoderPreference"]
   };
+}
+
+function readConcurrency(): number {
+  const value = Number($<HTMLSelectElement>("concurrency").value);
+  if (!Number.isInteger(value) || value < 0 || value > 8) return 1;
+  return value;
 }
 
 function effectiveSettings(item: BatchItem): CompressionSettings {
@@ -142,10 +151,21 @@ function validateForStart(settings: CompressionSettings): string | null {
     const targetMb = Number($<HTMLInputElement>("target-mb").value);
     if (!Number.isFinite(targetMb) || targetMb <= 0) return "Vul een doelgrootte groter dan 0 MB in.";
   }
-  const concurrency = Number($<HTMLInputElement>("concurrency").value);
-  if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 8) return "Gelijktijdige taken moeten tussen 1 en 8 liggen.";
+  const concurrency = readConcurrency();
+  if (!Number.isInteger(concurrency) || concurrency < 0 || concurrency > 8) return "Gelijktijdige taken moeten Auto of 1–8 zijn.";
   if (settings.videoCodec === "h265" && (!ffmpegStatusCache?.available || !ffmpegStatusCache.codecs.h265)) {
     return "H.265 is niet beschikbaar in de huidige FFmpeg-installatie. Kies H.264.";
+  }
+  const preference = settings.encoderPreference ?? "auto";
+  const hardware = ffmpegStatusCache?.hardware;
+  if (preference === "nvidia" && !(hardware?.nvidia.h264 || hardware?.nvidia.h265)) {
+    return "NVIDIA NVENC is niet beschikbaar. Kies Automatisch of CPU.";
+  }
+  if (preference === "amd" && !(hardware?.amd.h264 || hardware?.amd.h265)) {
+    return "AMD AMF is niet beschikbaar. Kies Automatisch of CPU.";
+  }
+  if (preference === "intel" && !(hardware?.intel.h264 || hardware?.intel.h265)) {
+    return "Intel Quick Sync is niet beschikbaar. Kies Automatisch of CPU.";
   }
   return null;
 }
@@ -326,7 +346,15 @@ function syncActions(summary = localSummary()): void {
   else if (!ffmpegReady) reason = "FFmpeg is niet beschikbaar. Ga naar Instellingen.";
   else if (!summary.queued) reason = items.size ? "Geen wachtende bestanden." : "Voeg eerst video’s toe.";
   start.disabled = batchRunning || !ffmpegReady || summary.queued === 0;
-  $("start-hint").textContent = batchRunning ? "De batch loopt. Je kunt een bestand apart annuleren." : reason;
+  if (batchRunning) {
+    const runtime = lastBatchRuntime;
+    const mode = runtime?.concurrencyMode === "auto" ? "Auto" : "Handmatig";
+    const encoder = runtime?.encoderLabel ?? "encoder";
+    const parallel = runtime?.concurrency ?? "—";
+    $("start-hint").textContent = `${mode} · ${parallel} tegelijk · ${encoder} · ${summary.running} bezig · ${summary.queued} wachtend`;
+  } else {
+    $("start-hint").textContent = reason;
+  }
   $("cancel-button").classList.toggle("hidden", !batchRunning);
   $<HTMLButtonElement>("clear-button").disabled = batchRunning || ![...items.values()].some((item) => item.status !== "running");
   $<HTMLButtonElement>("clear-completed").disabled = summary.completed === 0;
@@ -349,6 +377,7 @@ function syncSettingsMirrors(fromConverter: boolean): void {
     ["target-mb", "settings-target-mb"],
     ["audio-bitrate", "settings-audio"],
     ["video-codec", "settings-codec"],
+    ["encoder-preference", "settings-encoder"],
     ["preset", "settings-preset"],
     ["concurrency", "settings-concurrency"],
     ["resolution", "settings-resolution"],
@@ -369,9 +398,10 @@ function savePreferences(): void {
   const preferences: Preferences = {
     mode: currentMode(),
     targetMb: Number($<HTMLInputElement>("target-mb").value) || 50,
-    concurrency: Number($<HTMLInputElement>("concurrency").value) || 1,
+    concurrency: readConcurrency(),
     audioBitrate: $<HTMLSelectElement>("audio-bitrate").value,
     videoCodec: $<HTMLSelectElement>("video-codec").value,
+    encoderPreference: $<HTMLSelectElement>("encoder-preference").value,
     preset: $<HTMLSelectElement>("preset").value,
     resolution: $<HTMLSelectElement>("resolution").value,
     frameRate: $<HTMLSelectElement>("framerate").value,
@@ -404,13 +434,20 @@ function sanitizePreferences(raw: string | null): Preferences | null {
     if (value.mode === "compress" || value.mode === "convert") preferences.mode = value.mode;
     if (typeof value.targetMb === "number" && Number.isFinite(value.targetMb) && value.targetMb > 0) preferences.targetMb = value.targetMb;
     if (typeof value.concurrency === "number" && Number.isFinite(value.concurrency)) {
-      preferences.concurrency = Math.min(8, Math.max(1, Math.round(value.concurrency)));
+      preferences.concurrency = Math.min(8, Math.max(0, Math.round(value.concurrency)));
     }
     if (value.audioBitrate === "96" || value.audioBitrate === "128" || value.audioBitrate === "160" || value.audioBitrate === "192") {
       preferences.audioBitrate = value.audioBitrate;
     }
     if (value.videoCodec === "h264" || value.videoCodec === "h265") preferences.videoCodec = value.videoCodec;
-    if (value.preset === "ultrafast" || value.preset === "fast" || value.preset === "medium" || value.preset === "slow") preferences.preset = value.preset;
+    if (value.encoderPreference === "auto" || value.encoderPreference === "cpu" || value.encoderPreference === "nvidia"
+      || value.encoderPreference === "intel" || value.encoderPreference === "amd") {
+      preferences.encoderPreference = value.encoderPreference;
+    }
+    if (value.preset === "ultrafast" || value.preset === "veryfast" || value.preset === "faster"
+      || value.preset === "fast" || value.preset === "medium" || value.preset === "slow") {
+      preferences.preset = value.preset;
+    }
     if (value.resolution === "original" || value.resolution === "1080p" || value.resolution === "720p" || value.resolution === "480p") {
       preferences.resolution = value.resolution;
     }
@@ -473,10 +510,11 @@ function loadPreferences(): void {
     }
     if (typeof preferences.targetMb === "number" && preferences.targetMb > 0) $<HTMLInputElement>("target-mb").value = String(preferences.targetMb);
     if (typeof preferences.concurrency === "number") {
-      $<HTMLInputElement>("concurrency").value = String(preferences.concurrency);
+      setSelect("concurrency", String(preferences.concurrency));
     }
     setSelect("audio-bitrate", preferences.audioBitrate);
     setSelect("video-codec", preferences.videoCodec);
+    setSelect("encoder-preference", preferences.encoderPreference);
     setSelect("preset", preferences.preset);
     setSelect("resolution", preferences.resolution);
     setSelect("framerate", preferences.frameRate);
@@ -588,11 +626,22 @@ function renderDetails(): void {
     ["Modus", settings.mode === "compress" ? "Comprimeren" : "Converteren"],
     ["Doel", settings.mode === "compress" ? `${settings.targetMb} MB` : "—"],
     ["Codec", settings.videoCodec.toUpperCase()],
+    ["Encoderkeuze", settings.encoderPreference ?? "auto"],
     ["Preset", settings.preset],
     ["Status", STATUS_LABEL[item.status]]
   ];
+  if (item.progress.encoderLabel) rows.push(["Actieve encoder", item.progress.encoderLabel]);
   if (item.result) {
     rows.push(["Resultaat", formatBytes(item.result.outputBytes)], ["Uitvoer", item.result.outputPath], ["Besparing", savingLabel(item.result).text]);
+    if (item.result.performance) {
+      const perf = item.result.performance;
+      rows.push(
+        ["Gebruikte encoder", perf.encoderLabel + (perf.fellBackToCpu ? " (fallback CPU)" : "")],
+        ["Encodingtijd", `${(perf.encodingMs / 1000).toFixed(1)} s`],
+        ["Totale tijd", `${(perf.totalMs / 1000).toFixed(1)} s`],
+        ["Gem. FPS", perf.averageFps != null ? String(perf.averageFps) : "—"]
+      );
+    }
   }
   if (item.error) rows.push(["Fout", item.error]);
   body.replaceChildren(...rows.flatMap(([dt, dd]) => {
@@ -714,9 +763,10 @@ async function startBatch(): Promise<void> {
   if (!queued.length) return;
   for (const item of queued) items.set(item.id, item);
   batchRunning = true;
+  lastBatchRuntime = null;
   renderQueue();
   try {
-    await getApi().startBatch(queued, Number($<HTMLInputElement>("concurrency").value) || 1);
+    await getApi().startBatch(queued, readConcurrency());
   } finally {
     batchRunning = false;
     renderQueue();
@@ -750,9 +800,18 @@ function applyFfmpegStatus(status: FfmpegStatus): void {
     ? "Bezig met zoeken en valideren…"
     : status.message;
   $("ffmpeg-location").textContent = status.location ?? (status.available ? "Windows PATH" : "Niet gevonden");
-  $("ffmpeg-codecs").textContent = `H.264 ${status.codecs.h264 ? "aanwezig" : "ontbreekt"} · H.265 ${status.codecs.h265 ? "aanwezig" : "ontbreekt"} · AAC ${status.codecs.aac ? "aanwezig" : "ontbreekt"}`;
+  const hw = status.hardware ?? { nvidia: { h264: false, h265: false }, intel: { h264: false, h265: false }, amd: { h264: false, h265: false } };
+  $("ffmpeg-codecs").textContent = [
+    `H.264 ${status.codecs.h264 ? "aanwezig" : "ontbreekt"}`,
+    `H.265 ${status.codecs.h265 ? "aanwezig" : "ontbreekt"}`,
+    `AAC ${status.codecs.aac ? "aanwezig" : "ontbreekt"}`,
+    `NVENC ${hw.nvidia.h264 || hw.nvidia.h265 ? "ok" : "nee"}`,
+    `AMF ${hw.amd.h264 || hw.amd.h265 ? "ok" : "nee"}`,
+    `QSV ${hw.intel.h264 || hw.intel.h265 ? "ok" : "nee"}`
+  ].join(" · ");
   $("ffmpeg-install").classList.toggle("hidden", status.available || status.state === "checking" || !installing);
   applyCodecAvailability(status);
+  applyEncoderAvailability(status);
   syncActions();
   if (status.available) void reprobeQueued();
   if (currentPage === "about") renderAbout();
@@ -780,6 +839,39 @@ function applyCodecAvailability(status: FfmpegStatus): void {
       savePreferences();
     }
   }
+}
+
+function applyEncoderAvailability(status: FfmpegStatus): void {
+  const hw = status.hardware ?? { nvidia: { h264: false, h265: false }, intel: { h264: false, h265: false }, amd: { h264: false, h265: false } };
+  const hint = $("encoder-hint");
+  for (const id of ["encoder-preference", "settings-encoder"] as const) {
+    const select = $<HTMLSelectElement>(id);
+    const setOption = (value: string, enabled: boolean, label: string): void => {
+      const option = Array.from(select.options).find((entry) => entry.value === value);
+      if (!option) return;
+      option.disabled = !enabled;
+      option.textContent = label;
+    };
+    setOption("auto", true, "Automatisch");
+    setOption("cpu", status.available, status.available ? "CPU" : "CPU (FFmpeg ontbreekt)");
+    setOption("nvidia", Boolean(hw.nvidia.h264 || hw.nvidia.h265), hw.nvidia.h264 || hw.nvidia.h265 ? "NVIDIA" : "NVIDIA (niet beschikbaar)");
+    setOption("intel", Boolean(hw.intel.h264 || hw.intel.h265), hw.intel.h264 || hw.intel.h265 ? "Intel" : "Intel (niet beschikbaar)");
+    setOption("amd", Boolean(hw.amd.h264 || hw.amd.h265), hw.amd.h264 || hw.amd.h265 ? "AMD" : "AMD (niet beschikbaar)");
+    const selected = select.options[select.selectedIndex];
+    if (selected?.disabled) {
+      select.value = "auto";
+      if (id === "encoder-preference") syncSettingsMirrors(true);
+      else syncSettingsMirrors(false);
+      savePreferences();
+    }
+  }
+  const active = [];
+  if (hw.nvidia.h264 || hw.nvidia.h265) active.push("NVIDIA");
+  if (hw.amd.h264 || hw.amd.h265) active.push("AMD");
+  if (hw.intel.h264 || hw.intel.h265) active.push("Intel");
+  hint.textContent = active.length
+    ? `Automatisch gebruikt ${active.join(" / ")} wanneer beschikbaar; anders CPU. Snellere presets = grotere bestanden bij dezelfde kwaliteit.`
+    : "Geen bruikbare hardware-encoder gevonden; Automatisch gebruikt CPU. Snellere presets = grotere bestanden bij dezelfde kwaliteit.";
 }
 
 async function reprobeQueued(): Promise<void> {
@@ -833,6 +925,7 @@ function applyUpdateState(state: UpdateState): void {
 getApi().onBatchUpdate((update) => {
   const previous = items.get(update.item.id);
   items.set(update.item.id, update.item);
+  if (update.summary.runtime) lastBatchRuntime = update.summary.runtime;
   if (previous && previous.status !== update.item.status && (update.item.status === "completed" || update.item.status === "failed" || update.item.status === "cancelled")) {
     pushHistory(update.item);
   }
@@ -867,7 +960,7 @@ document.querySelectorAll<HTMLInputElement>('input[name="theme"]').forEach((inpu
   });
 });
 
-for (const id of ["target-mb", "audio-bitrate", "video-codec", "preset", "concurrency", "resolution", "framerate", "keep-audio"]) {
+for (const id of ["target-mb", "audio-bitrate", "video-codec", "encoder-preference", "preset", "concurrency", "resolution", "framerate", "keep-audio"]) {
   $(id).addEventListener("change", () => {
     syncSettingsMirrors(true);
     savePreferences();
@@ -876,7 +969,7 @@ for (const id of ["target-mb", "audio-bitrate", "video-codec", "preset", "concur
 }
 $("advanced-toggle").addEventListener("toggle", () => savePreferences());
 
-for (const id of ["settings-target-mb", "settings-audio", "settings-codec", "settings-preset", "settings-concurrency", "settings-resolution", "settings-framerate", "settings-keep-audio"]) {
+for (const id of ["settings-target-mb", "settings-audio", "settings-codec", "settings-encoder", "settings-preset", "settings-concurrency", "settings-resolution", "settings-framerate", "settings-keep-audio"]) {
   $(id).addEventListener("change", () => {
     syncSettingsMirrors(false);
     savePreferences();

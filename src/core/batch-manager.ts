@@ -1,8 +1,15 @@
 import { Compressor } from "./compressor";
+import { EMPTY_HARDWARE, HardwareCapabilities } from "./encoders";
 import { OutputPathAllocator } from "./output-paths";
-import { BatchItem, BatchUpdate, CompressionProgress } from "../shared/types";
+import { selectNextQueuedItem } from "./scheduler";
+import { BatchItem, BatchRuntimeInfo, BatchSummary, BatchUpdate, CompressionProgress } from "../shared/types";
 
 export type BatchListener = (update: BatchUpdate) => void;
+
+export interface BatchManagerOptions {
+  hardware?: HardwareCapabilities;
+  runtime?: BatchRuntimeInfo;
+}
 
 export class BatchManager {
   private items = new Map<string, BatchItem>();
@@ -11,9 +18,22 @@ export class BatchManager {
   private running = false;
   private listener: BatchListener | null = null;
   private readonly outputAllocator = new OutputPathAllocator();
+  private readonly hardware: HardwareCapabilities;
+  private readonly runtime: BatchRuntimeInfo;
 
-  constructor(private readonly ffmpegPath: string, private readonly concurrency = 1) {
+  constructor(
+    private readonly ffmpegPath: string,
+    private readonly concurrency = 1,
+    options: BatchManagerOptions = {},
+  ) {
     if (!Number.isInteger(concurrency) || concurrency < 1) throw new Error("Paralleliteit moet minstens 1 zijn.");
+    this.hardware = options.hardware ?? EMPTY_HARDWARE;
+    this.runtime = options.runtime ?? {
+      concurrency,
+      concurrencyMode: "manual",
+      encoderFamily: "cpu",
+      encoderLabel: "CPU"
+    };
   }
 
   async start(items: BatchItem[], listener: BatchListener): Promise<BatchItem[]> {
@@ -54,12 +74,10 @@ export class BatchManager {
   }
 
   private claimNext(): BatchItem | null {
-    for (const item of this.items.values()) {
-      if (item.status !== "queued") continue;
-      item.status = "running";
-      return item;
-    }
-    return null;
+    const next = selectNextQueuedItem(this.items.values());
+    if (!next) return null;
+    next.status = "running";
+    return next;
   }
 
   private async worker(listener: BatchListener): Promise<void> {
@@ -79,7 +97,7 @@ export class BatchManager {
             item.progress = progress;
             this.emit(listener, item);
           },
-          { outputAllocator: this.outputAllocator }
+          { outputAllocator: this.outputAllocator, hardware: this.hardware }
         );
         if (!item.result?.outputPath) {
           item.status = "failed";
@@ -87,7 +105,14 @@ export class BatchManager {
           item.progress = this.progress("error", item.error);
         } else {
           item.status = "completed";
-          item.progress = this.progress("completed", "Voltooid", 100);
+          const fallbackNote = item.result.performance?.fellBackToCpu ? " · fallback CPU" : "";
+          const encoderNote = item.result.performance?.encoderLabel
+            ? ` · ${item.result.performance.encoderLabel}`
+            : "";
+          item.progress = this.progress("completed", `Voltooid${encoderNote}${fallbackNote}`, 100);
+          if (item.result.performance?.encoderLabel) {
+            item.progress.encoderLabel = item.result.performance.encoderLabel;
+          }
         }
       } catch (error) {
         const message = (error as Error).message;
@@ -120,8 +145,15 @@ export class BatchManager {
     for (const item of this.items.values()) this.emit(listener, item);
   }
 
-  private summary(): BatchUpdate["summary"] {
-    const summary = { queued: 0, running: 0, completed: 0, failed: 0, cancelled: 0 };
+  private summary(): BatchSummary {
+    const summary: BatchSummary = {
+      queued: 0,
+      running: 0,
+      completed: 0,
+      failed: 0,
+      cancelled: 0,
+      runtime: this.runtime
+    };
     for (const item of this.items.values()) summary[item.status]++;
     return summary;
   }

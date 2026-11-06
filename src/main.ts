@@ -2,8 +2,12 @@ import { app, BrowserWindow, dialog, ipcMain, nativeTheme, shell } from "electro
 import { existsSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
 import { BatchManager } from "./core/batch-manager";
+import { computeAdaptiveConcurrency, maxPixelsInBatch } from "./core/concurrency";
+import { selectEncoder } from "./core/encoders";
 import { probeFile } from "./core/probe";
-import { BatchItem } from "./shared/types";
+import { readSystemResources } from "./core/system-resources";
+import { cleanupStaleWorkDirs } from "./core/temp-cleanup";
+import { BatchItem, BatchRuntimeInfo } from "./shared/types";
 import { FfmpegProvider } from "./core/ffmpeg-provider";
 import { AppUpdater } from "./core/updater";
 
@@ -70,7 +74,10 @@ function validateBatchItem(item: BatchItem): void {
   if (!item.id || !Number.isFinite(item.metadata.duration) || item.metadata.duration <= 0) throw new Error("Ongeldige batchmetadata.");
   if (!["compress", "convert"].includes(item.settings.mode)) throw new Error("Ongeldige verwerkingsmodus.");
   if (item.settings.mode === "compress" && (!Number.isFinite(item.settings.targetMb) || item.settings.targetMb <= 0)) throw new Error("Doelgrootte moet groter zijn dan 0 MB.");
-  if (!["h264", "h265"].includes(item.settings.videoCodec) || !["ultrafast", "fast", "medium", "slow"].includes(item.settings.preset)) throw new Error("Ongeldige compressie-instellingen.");
+  if (!["h264", "h265"].includes(item.settings.videoCodec)) throw new Error("Ongeldige compressie-instellingen.");
+  if (!["ultrafast", "veryfast", "faster", "fast", "medium", "slow"].includes(item.settings.preset)) throw new Error("Ongeldige compressie-instellingen.");
+  const preference = item.settings.encoderPreference ?? "auto";
+  if (!["auto", "cpu", "nvidia", "intel", "amd"].includes(preference)) throw new Error("Ongeldige encoderkeuze.");
 }
 
 function createWindow(): BrowserWindow {
@@ -98,6 +105,10 @@ function createWindow(): BrowserWindow {
 
 app.whenReady().then(() => {
   ensureWindowsShortcuts();
+  const staleWork = cleanupStaleWorkDirs();
+  if (staleWork.removed.length || staleWork.failed.length) {
+    console.log(`[TempCleanup] scanned=${staleWork.scanned} removed=${staleWork.removed.length} failed=${staleWork.failed.length}`);
+  }
   const window = createWindow();
   const provider = new FfmpegProvider(join(process.resourcesPath, "ffmpeg"), appDirectory());
   const updater = new AppUpdater();
@@ -175,7 +186,7 @@ app.whenReady().then(() => {
   ipcMain.handle("start-batch", async (event, items: BatchItem[], concurrency: number) => {
     if (activeBatch) throw new Error("Er draait al een batch.");
     if (!Array.isArray(items) || items.length === 0) throw new Error("De batch bevat geen bestanden.");
-    if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 8) throw new Error("Paralleliteit moet tussen 1 en 8 liggen.");
+    if (!Number.isInteger(concurrency) || concurrency < 0 || concurrency > 8) throw new Error("Paralleliteit moet tussen 0 (auto) en 8 liggen.");
     if (!provider.getStatus().available) {
       binaryStatus = await provider.detect();
       sendBinaryStatus();
@@ -203,7 +214,31 @@ app.whenReady().then(() => {
         };
       }
     }));
-    activeBatch = new BatchManager(provider.getFfmpegPath(), concurrency);
+    const queuedItems = preparedItems.filter((item) => item.status === "queued");
+    const sample = queuedItems[0];
+    const preference = sample?.settings.encoderPreference ?? "auto";
+    const codec = sample?.settings.videoCodec ?? "h264";
+    const selected = selectEncoder(preference, codec, ffmpegStatus.hardware);
+    const resources = await readSystemResources();
+    const concurrencyMode = concurrency === 0 ? "auto" as const : "manual" as const;
+    const effectiveConcurrency = concurrency === 0
+      ? computeAdaptiveConcurrency({
+          family: selected.family,
+          maxPixels: maxPixelsInBatch(queuedItems),
+          resources,
+          maxConcurrency: 8
+        })
+      : concurrency;
+    const runtime: BatchRuntimeInfo = {
+      concurrency: effectiveConcurrency,
+      concurrencyMode,
+      encoderFamily: selected.family,
+      encoderLabel: selected.label
+    };
+    activeBatch = new BatchManager(provider.getFfmpegPath(), effectiveConcurrency, {
+      hardware: ffmpegStatus.hardware,
+      runtime
+    });
     try {
       await activeBatch.start(preparedItems, (update) => event.sender.send("batch-update", update));
     } finally {

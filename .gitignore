@@ -5,7 +5,11 @@ release/
 .DS_Store
 Thumbs.db
 *.log
+scripts/phase5-results.jsonl
+scripts/phase6-results/
 .video-compressor/
+_shell_probe.txt
+/-
 ffmpeg/
 ffmpeg.json
 *.exe

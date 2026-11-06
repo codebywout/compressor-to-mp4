@@ -59,10 +59,11 @@ test("cancelItem cancels a queued item without stopping others", async () => {
   const manager = new BatchManager("missing-ffmpeg-for-test", 1);
   let cancelledQueued = false;
   const result = await manager.start([item("keep"), item("drop")], (update) => {
-    if (!cancelledQueued && update.item.id === "keep" && update.item.status === "running") {
+    if (!cancelledQueued) {
       manager.cancelItem("drop");
       cancelledQueued = true;
     }
+    void update;
   });
   const dropped = result.find((candidate) => candidate.id === "drop");
   assert.equal(dropped?.status, "cancelled");
@@ -77,4 +78,23 @@ test("partial batch failure keeps independent statuses", async () => {
   const result = await manager.start([failed, item("a"), item("b")], () => undefined);
   assert.equal(result.find((candidate) => candidate.id === "prefailed")?.status, "failed");
   assert.equal(result.filter((candidate) => candidate.status === "failed").length, 3);
+});
+
+test("batch claims lighter jobs before heavy 4K while preserving map order for listing", async () => {
+  const heavy = item("heavy");
+  heavy.metadata = { ...heavy.metadata, duration: 600, width: 3840, height: 2160 };
+  const light = item("light");
+  light.metadata = { ...light.metadata, duration: 5, width: 1280, height: 720 };
+  const order: string[] = [];
+  const manager = new BatchManager("missing-ffmpeg-for-test", 1, {
+    runtime: { concurrency: 1, concurrencyMode: "auto", encoderFamily: "nvidia", encoderLabel: "NVIDIA NVENC (H264)" }
+  });
+  await manager.start([heavy, light], (update) => {
+    if (update.item.status === "running") order.push(update.item.id);
+    if (update.summary.runtime) {
+      assert.equal(update.summary.runtime.concurrency, 1);
+      assert.equal(update.summary.runtime.concurrencyMode, "auto");
+    }
+  });
+  assert.deepEqual(order, ["light", "heavy"]);
 });

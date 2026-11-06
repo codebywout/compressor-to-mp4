@@ -1,3 +1,6 @@
+export type EncoderPreference = "auto" | "cpu" | "nvidia" | "intel" | "amd";
+export type SpeedPreset = "ultrafast" | "veryfast" | "faster" | "fast" | "medium" | "slow";
+
 export interface VideoMetadata {
   size: number;
   duration: number;
@@ -17,8 +20,10 @@ export interface CompressionSettings {
   audioBitrateKbps: number;
   resolution: "original" | "1080p" | "720p" | "480p";
   frameRate: "original" | number;
-  preset: "ultrafast" | "fast" | "medium" | "slow";
+  preset: SpeedPreset;
   keepAudio: boolean;
+  /** Hardware preference; defaults to auto when omitted (older clients). */
+  encoderPreference?: EncoderPreference;
 }
 
 export interface CompressionProgress {
@@ -28,6 +33,21 @@ export interface CompressionProgress {
   etaSeconds: number | null;
   bitrate: string;
   message?: string;
+  /** Encoder that is actively encoding (after resolution / fallback). */
+  encoderLabel?: string;
+}
+
+export interface EncodingPerformance {
+  encoderId: string;
+  encoderLabel: string;
+  preset: string;
+  preference: EncoderPreference;
+  fellBackToCpu: boolean;
+  attempts: number;
+  encodingMs: number;
+  moveMs: number;
+  totalMs: number;
+  averageFps: number | null;
 }
 
 export interface CompressionResult {
@@ -39,6 +59,7 @@ export interface CompressionResult {
   videoBitrateKbps: number;
   settings: CompressionSettings;
   metadata: VideoMetadata;
+  performance?: EncodingPerformance;
 }
 
 export type BatchItemStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
@@ -55,7 +76,23 @@ export interface BatchItem {
   error?: string;
 }
 
+export interface BatchRuntimeInfo {
+  concurrency: number;
+  concurrencyMode: "auto" | "manual";
+  encoderFamily: "cpu" | "nvidia" | "intel" | "amd";
+  encoderLabel: string;
+}
+
+export interface BatchSummary {
+  queued: number;
+  running: number;
+  completed: number;
+  failed: number;
+  cancelled: number;
+  runtime?: BatchRuntimeInfo;
+}
+
 export interface BatchUpdate {
   item: BatchItem;
-  summary: { queued: number; running: number; completed: number; failed: number; cancelled: number };
+  summary: BatchSummary;
 }
