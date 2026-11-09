@@ -27,7 +27,7 @@ export interface StoredHistoryEntry {
   durationSeconds: number | null;
 }
 
-const AUDIO = new Set(["96", "128", "160", "192"]);
+const AUDIO = new Set(["48", "64", "96", "128", "160", "192"]);
 const CODECS = new Set(["h264", "h265"]);
 const ENCODERS = new Set(["auto", "cpu", "nvidia", "intel", "amd"]);
 const PRESETS = new Set(["ultrafast", "veryfast", "faster", "fast", "medium", "slow"]);

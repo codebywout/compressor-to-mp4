@@ -147,9 +147,10 @@ export function encoderSpeedArgs(encoder: ResolvedEncoder, preset: SpeedPreset):
 
 /** Video codec args for a target bitrate (kbps). */
 export function buildVideoEncodeArgs(encoder: ResolvedEncoder, preset: SpeedPreset, bitrateKbps: number): string[] {
-  const rate = Math.max(100, Math.floor(bitrateKbps));
+  // Allow tight size budgets below 100 kb/s (long lectures); never go below 1 kb/s.
+  const rate = Math.max(1, Math.floor(bitrateKbps));
   const maxrate = rate;
-  const bufsize = rate * 2;
+  const bufsize = Math.max(rate * 2, 64);
   return [
     "-c:v", encoder.id,
     ...encoderSpeedArgs(encoder, preset),

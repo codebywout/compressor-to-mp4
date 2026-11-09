@@ -319,9 +319,10 @@ export class FfmpegProvider {
       if (!listed[probe.family][probe.codec]) continue;
       log(`Probing hardware encoder: ${probe.encoder}`);
       const nullTarget = process.platform === "win32" ? "NUL" : "/dev/null";
+      // NVENC/AMF reject very small frames (e.g. 128x72). 256x144 is safely above the minimum.
       const check = await this.runCommand(ffmpegPath, [
         "-hide_banner", "-loglevel", "error",
-        "-f", "lavfi", "-i", "testsrc=size=128x72:rate=1",
+        "-f", "lavfi", "-i", "testsrc=size=256x144:rate=1",
         "-frames:v", "1",
         "-pix_fmt", "yuv420p",
         "-c:v", probe.encoder,
