@@ -436,7 +436,8 @@ function sanitizePreferences(raw: string | null): Preferences | null {
     if (typeof value.concurrency === "number" && Number.isFinite(value.concurrency)) {
       preferences.concurrency = Math.min(8, Math.max(0, Math.round(value.concurrency)));
     }
-    if (value.audioBitrate === "96" || value.audioBitrate === "128" || value.audioBitrate === "160" || value.audioBitrate === "192") {
+    if (value.audioBitrate === "48" || value.audioBitrate === "64" || value.audioBitrate === "96"
+      || value.audioBitrate === "128" || value.audioBitrate === "160" || value.audioBitrate === "192") {
       preferences.audioBitrate = value.audioBitrate;
     }
     if (value.videoCodec === "h264" || value.videoCodec === "h265") preferences.videoCodec = value.videoCodec;

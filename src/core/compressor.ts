@@ -1,7 +1,7 @@
 import { copyFileSync, existsSync, mkdtempSync, renameSync, rmSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { calculateVideoBitrateKbps, resolutionFilter } from "./bitrate";
+import { MIN_VIDEO_BITRATE_KBPS, planSizeBudget, resolutionFilter } from "./bitrate";
 import {
   buildVideoEncodeArgs,
   canSkipReencodeForSize,
@@ -96,28 +96,38 @@ export class Compressor {
           }
         }
 
-        let bitrate = calculateVideoBitrateKbps(settings.targetMb, metadata.duration, settings);
+        const budget = planSizeBudget(settings.targetMb, metadata.duration, settings);
+        let encodeSettings: CompressionSettings = {
+          ...settings,
+          keepAudio: budget.keepAudio,
+          audioBitrateKbps: budget.keepAudio ? budget.audioBitrateKbps : settings.audioBitrateKbps
+        };
+        let bitrate = budget.videoBitrateKbps;
         let success = skipEncode;
         let useEncoder = resolved;
+        const maxAttempts = 4;
 
-        for (let attempt = 0; !skipEncode && attempt < 3; attempt++) {
+        for (let attempt = 0; !skipEncode && attempt < maxAttempts; attempt++) {
           if (this.cancelled) throw new Error("Conversie geannuleerd.");
           attempts = attempt + 1;
+          const audioNote = budget.audioReduced || encodeSettings.audioBitrateKbps !== settings.audioBitrateKbps
+            ? ` · audio ${encodeSettings.keepAudio ? `${encodeSettings.audioBitrateKbps} kb/s` : "uit"}`
+            : "";
           emit({
             status: "encoding",
             percent: 0,
             speed: "",
             etaSeconds: null,
             bitrate: `${bitrate} kb/s`,
-            message: `${useEncoder.label} · poging ${attempt + 1}/3`
+            message: `${useEncoder.label} · poging ${attempt + 1}/${maxAttempts}${audioNote}`
           });
           rmSync(tempOutput, { force: true });
           const encodeStarted = Date.now();
           try {
             if (useEncoder.supportsTwoPass) {
-              await this.twoPass(ffmpegPath, inputPath, tempOutput, workDir, metadata, settings, bitrate, useEncoder, emit);
+              await this.twoPass(ffmpegPath, inputPath, tempOutput, workDir, metadata, encodeSettings, bitrate, useEncoder, emit);
             } else {
-              await this.singlePass(ffmpegPath, inputPath, tempOutput, metadata, settings, bitrate, useEncoder, emit);
+              await this.singlePass(ffmpegPath, inputPath, tempOutput, metadata, encodeSettings, bitrate, useEncoder, emit);
             }
           } catch (error) {
             encodingMs += Date.now() - encodeStarted;
@@ -147,9 +157,22 @@ export class Compressor {
             resolved = useEncoder;
             break;
           }
-          bitrate = Math.max(100, Math.floor(bitrate * (settings.targetMb * 1_000_000 / outputBytes) * 0.97));
+          const scale = (settings.targetMb * 1_000_000 / outputBytes) * 0.94;
+          bitrate = Math.max(MIN_VIDEO_BITRATE_KBPS, Math.floor(bitrate * scale));
+          // Also tighten audio on later retries so long lectures can still fit.
+          if (encodeSettings.keepAudio && encodeSettings.audioBitrateKbps > 32) {
+            encodeSettings = {
+              ...encodeSettings,
+              audioBitrateKbps: Math.max(32, Math.floor(encodeSettings.audioBitrateKbps * 0.75))
+            };
+          }
         }
-        if (!success) throw new Error("FFmpeg kon de ingestelde maximale bestandsgrootte niet bereiken.");
+        if (!success) {
+          throw new Error(
+            "FFmpeg kon de ingestelde maximale bestandsgrootte niet bereiken. " +
+            "Voor lange video's: verlaag de audiobitrate (48–64 kb/s), schakel audio uit, of verhoog de limiet iets."
+          );
+        }
       }
 
       if (this.cancelled) throw new Error("Conversie geannuleerd.");
