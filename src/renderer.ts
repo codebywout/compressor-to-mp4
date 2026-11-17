@@ -40,10 +40,18 @@ const STORAGE_KEY = "video-compressor.preferences.v1";
 const HISTORY_KEY = "video-compressor.history.v1";
 const STATUS_LABEL = { queued: "Wachtend", running: "Bezig", completed: "Voltooid", failed: "Fout", cancelled: "Geannuleerd" } as const;
 const PAGE_COPY: Record<PageId, { title: string; subtitle: string }> = {
-  converter: { title: "Converter", subtitle: "Comprimeer of converteer video’s naar MP4" },
-  history: { title: "Geschiedenis", subtitle: "Eerdere resultaten, gescheiden van de actieve wachtrij" },
-  settings: { title: "Instellingen", subtitle: "Uiterlijk, standaardwaarden, FFmpeg en updates" },
-  about: { title: "Over", subtitle: "Versie- en diagnose-informatie" }
+  converter: { title: "Converter", subtitle: "" },
+  history: { title: "Geschiedenis", subtitle: "" },
+  settings: { title: "Instellingen", subtitle: "" },
+  about: { title: "Over", subtitle: "" }
+};
+
+const ENCODER_CHOICE_LABEL: Record<string, string> = {
+  auto: "Automatisch",
+  cpu: "Computer",
+  nvidia: "NVIDIA",
+  intel: "Intel",
+  amd: "AMD"
 };
 
 const items = new Map<string, BatchItem>();
@@ -340,20 +348,22 @@ function renderSummary(): void {
 
 function syncActions(summary = localSummary()): void {
   const start = $<HTMLButtonElement>("compress-button");
-  start.textContent = batchRunning ? "Bezig…" : currentMode() === "convert" ? "Start conversie" : "Start compressie";
+  start.textContent = batchRunning ? "Bezig…" : "Start";
   let reason = "";
-  if (ffmpegState === "checking") reason = "FFmpeg wordt nog gecontroleerd.";
-  else if (!ffmpegReady) reason = "FFmpeg is niet beschikbaar. Ga naar Instellingen.";
-  else if (!summary.queued) reason = items.size ? "Geen wachtende bestanden." : "Voeg eerst video’s toe.";
+  if (ffmpegState === "checking") reason = "Even geduld…";
+  else if (!ffmpegReady) reason = "Open Instellingen om het video-hulpmiddel te installeren.";
+  else if (!summary.queued) reason = items.size ? "Geen wachtende bestanden." : "";
   start.disabled = batchRunning || !ffmpegReady || summary.queued === 0;
+  const hint = $("start-hint");
   if (batchRunning) {
-    const runtime = lastBatchRuntime;
-    const mode = runtime?.concurrencyMode === "auto" ? "Auto" : "Handmatig";
-    const encoder = runtime?.encoderLabel ?? "encoder";
-    const parallel = runtime?.concurrency ?? "—";
-    $("start-hint").textContent = `${mode} · ${parallel} tegelijk · ${encoder} · ${summary.running} bezig · ${summary.queued} wachtend`;
+    hint.textContent = `${summary.running} bezig${summary.queued ? ` · ${summary.queued} in wachtrij` : ""}`;
+    hint.classList.remove("hidden");
+  } else if (reason) {
+    hint.textContent = reason;
+    hint.classList.remove("hidden");
   } else {
-    $("start-hint").textContent = reason;
+    hint.textContent = "";
+    hint.classList.add("hidden");
   }
   $("cancel-button").classList.toggle("hidden", !batchRunning);
   $<HTMLButtonElement>("clear-button").disabled = batchRunning || ![...items.values()].some((item) => item.status !== "running");
@@ -365,8 +375,10 @@ function syncActions(summary = localSummary()): void {
 function updateModeUi(): void {
   const converting = currentMode() === "convert";
   $("target-mb-field").classList.toggle("hidden", converting);
+  $("audio-field").classList.toggle("hidden", converting);
+  $("keep-audio-field").classList.toggle("hidden", converting);
   $("codec-field").classList.toggle("hidden", converting);
-  $("convert-note").classList.toggle("hidden", !converting);
+  $("convert-note").classList.add("hidden");
   $("advanced-toggle").classList.toggle("hidden", converting);
   syncActions();
   renderQueue();
@@ -617,32 +629,18 @@ function renderDetails(): void {
   const settings = effectiveSettings(item);
   const rows: Array<[string, string]> = [
     ["Bestand", fileName(item.inputPath)],
-    ["Pad", item.inputPath],
     ["Grootte", formatBytes(item.metadata.size)],
     ["Duur", formatDuration(item.metadata.duration)],
-    ["Resolutie", item.metadata.width ? `${item.metadata.width}×${item.metadata.height}` : "—"],
-    ["Video", item.metadata.videoCodec || "—"],
-    ["Audio", item.metadata.audioCodec ?? "geen"],
-    ["Framerate", item.metadata.frameRate ? `${item.metadata.frameRate}` : "—"],
+    ["Beeld", item.metadata.width ? `${item.metadata.width}×${item.metadata.height}` : "—"],
     ["Modus", settings.mode === "compress" ? "Comprimeren" : "Converteren"],
     ["Doel", settings.mode === "compress" ? `${settings.targetMb} MB` : "—"],
-    ["Codec", settings.videoCodec.toUpperCase()],
-    ["Encoderkeuze", settings.encoderPreference ?? "auto"],
-    ["Preset", settings.preset],
     ["Status", STATUS_LABEL[item.status]]
   ];
-  if (item.progress.encoderLabel) rows.push(["Actieve encoder", item.progress.encoderLabel]);
   if (item.result) {
-    rows.push(["Resultaat", formatBytes(item.result.outputBytes)], ["Uitvoer", item.result.outputPath], ["Besparing", savingLabel(item.result).text]);
-    if (item.result.performance) {
-      const perf = item.result.performance;
-      rows.push(
-        ["Gebruikte encoder", perf.encoderLabel + (perf.fellBackToCpu ? " (fallback CPU)" : "")],
-        ["Encodingtijd", `${(perf.encodingMs / 1000).toFixed(1)} s`],
-        ["Totale tijd", `${(perf.totalMs / 1000).toFixed(1)} s`],
-        ["Gem. FPS", perf.averageFps != null ? String(perf.averageFps) : "—"]
-      );
-    }
+    rows.push(
+      ["Resultaat", formatBytes(item.result.outputBytes)],
+      ["Besparing", savingLabel(item.result).text]
+    );
   }
   if (item.error) rows.push(["Fout", item.error]);
   body.replaceChildren(...rows.flatMap(([dt, dd]) => {
@@ -672,7 +670,9 @@ function navigate(page: PageId): void {
     panel.hidden = !active;
   });
   $("page-title").textContent = PAGE_COPY[page].title;
-  $("page-subtitle").textContent = PAGE_COPY[page].subtitle;
+  const subtitle = $("page-subtitle");
+  subtitle.textContent = PAGE_COPY[page].subtitle;
+  subtitle.classList.toggle("hidden", !PAGE_COPY[page].subtitle);
   $("converter-action-bar").classList.toggle("hidden", page !== "converter");
   if (page === "about") renderAbout();
   if (page === "history") renderHistory();
@@ -681,15 +681,9 @@ function navigate(page: PageId): void {
 function renderAbout(): void {
   const list = $("about-list");
   const rows: Array<[string, string]> = [
-    ["Applicatie", appInfo?.name ?? "Video Compressor"],
+    ["App", appInfo?.name ?? "Video Compressor"],
     ["Versie", appInfo?.version ?? "—"],
-    ["Electron", appInfo?.electron ?? "—"],
-    ["FFmpeg", ffmpegStatusCache?.version ?? "—"],
-    ["FFmpeg-status", ffmpegStatusCache?.message ?? "—"],
-    ["FFmpeg-locatie", ffmpegStatusCache?.location ?? "—"],
-    ["Installatiemap", appInfo?.appDirectory ?? "—"],
-    ["User data", appInfo?.userData ?? "—"],
-    ["Update", latestUpdate?.message ?? "—"]
+    ["Video-hulpmiddel", ffmpegStatusCache?.available ? "Klaar" : (ffmpegStatusCache?.message ?? "—")]
   ];
   list.replaceChildren(...rows.flatMap(([dt, dd]) => {
     const term = document.createElement("dt");
@@ -787,29 +781,32 @@ function applyFfmpegStatus(status: FfmpegStatus): void {
   if (status.state === "checking") {
     panel.classList.add("is-wait");
     chip.dataset.state = "wait";
-    chip.textContent = "FFmpeg controleren";
+    chip.textContent = "Controleren…";
   } else if (status.available) {
     panel.classList.add("is-ok");
     chip.dataset.state = "ok";
-    chip.textContent = "FFmpeg klaar";
+    chip.textContent = "Klaar";
   } else {
     panel.classList.add("is-bad");
     chip.dataset.state = "error";
-    chip.textContent = "FFmpeg ontbreekt";
+    chip.textContent = "Niet gevonden";
   }
   $("ffmpeg-status").textContent = status.state === "checking"
-    ? "Bezig met zoeken en valideren…"
-    : status.message;
-  $("ffmpeg-location").textContent = status.location ?? (status.available ? "Windows PATH" : "Niet gevonden");
+    ? "Bezig met zoeken…"
+    : status.available
+      ? "Klaar voor gebruik."
+      : "Niet gevonden. Klik op Installeren.";
+  const locationRow = $("ffmpeg-location-row");
+  $("ffmpeg-location").textContent = status.location ?? (status.available ? "Systeem" : "—");
+  locationRow.classList.toggle("hidden", !status.available || !status.location);
   const hw = status.hardware ?? { nvidia: { h264: false, h265: false }, intel: { h264: false, h265: false }, amd: { h264: false, h265: false } };
-  $("ffmpeg-codecs").textContent = [
-    `H.264 ${status.codecs.h264 ? "aanwezig" : "ontbreekt"}`,
-    `H.265 ${status.codecs.h265 ? "aanwezig" : "ontbreekt"}`,
-    `AAC ${status.codecs.aac ? "aanwezig" : "ontbreekt"}`,
-    `NVENC ${hw.nvidia.h264 || hw.nvidia.h265 ? "ok" : "nee"}`,
-    `AMF ${hw.amd.h264 || hw.amd.h265 ? "ok" : "nee"}`,
-    `QSV ${hw.intel.h264 || hw.intel.h265 ? "ok" : "nee"}`
-  ].join(" · ");
+  const gpu: string[] = [];
+  if (hw.nvidia.h264 || hw.nvidia.h265) gpu.push("NVIDIA");
+  if (hw.amd.h264 || hw.amd.h265) gpu.push("AMD");
+  if (hw.intel.h264 || hw.intel.h265) gpu.push("Intel");
+  $("ffmpeg-codecs").textContent = status.available
+    ? (gpu.length ? `Versnelling: ${gpu.join(", ")}` : "Versnelling: computer")
+    : "";
   $("ffmpeg-install").classList.toggle("hidden", status.available || status.state === "checking" || !installing);
   applyCodecAvailability(status);
   applyEncoderAvailability(status);
@@ -825,13 +822,13 @@ function applyCodecAvailability(status: FfmpegStatus): void {
     if (!h265) continue;
     if (!status.available) {
       h265.disabled = true;
-      h265.textContent = "H.265 (FFmpeg niet beschikbaar)";
+      h265.textContent = "Kleiner bestand (niet beschikbaar)";
     } else if (!status.codecs.h265) {
       h265.disabled = true;
-      h265.textContent = "H.265 (niet ondersteund door deze FFmpeg)";
+      h265.textContent = "Kleiner bestand (niet beschikbaar)";
     } else {
       h265.disabled = false;
-      h265.textContent = "H.265";
+      h265.textContent = "Kleiner bestand";
     }
     if (h265.disabled && select.value === "h265") {
       select.value = "h264";
@@ -844,7 +841,6 @@ function applyCodecAvailability(status: FfmpegStatus): void {
 
 function applyEncoderAvailability(status: FfmpegStatus): void {
   const hw = status.hardware ?? { nvidia: { h264: false, h265: false }, intel: { h264: false, h265: false }, amd: { h264: false, h265: false } };
-  const hint = $("encoder-hint");
   for (const id of ["encoder-preference", "settings-encoder"] as const) {
     const select = $<HTMLSelectElement>(id);
     const setOption = (value: string, enabled: boolean, label: string): void => {
@@ -853,11 +849,11 @@ function applyEncoderAvailability(status: FfmpegStatus): void {
       option.disabled = !enabled;
       option.textContent = label;
     };
-    setOption("auto", true, "Automatisch");
-    setOption("cpu", status.available, status.available ? "CPU" : "CPU (FFmpeg ontbreekt)");
-    setOption("nvidia", Boolean(hw.nvidia.h264 || hw.nvidia.h265), hw.nvidia.h264 || hw.nvidia.h265 ? "NVIDIA" : "NVIDIA (niet beschikbaar)");
-    setOption("intel", Boolean(hw.intel.h264 || hw.intel.h265), hw.intel.h264 || hw.intel.h265 ? "Intel" : "Intel (niet beschikbaar)");
-    setOption("amd", Boolean(hw.amd.h264 || hw.amd.h265), hw.amd.h264 || hw.amd.h265 ? "AMD" : "AMD (niet beschikbaar)");
+    setOption("auto", true, ENCODER_CHOICE_LABEL.auto);
+    setOption("cpu", status.available, status.available ? ENCODER_CHOICE_LABEL.cpu : "Computer (niet beschikbaar)");
+    setOption("nvidia", Boolean(hw.nvidia.h264 || hw.nvidia.h265), hw.nvidia.h264 || hw.nvidia.h265 ? ENCODER_CHOICE_LABEL.nvidia : "NVIDIA (niet beschikbaar)");
+    setOption("intel", Boolean(hw.intel.h264 || hw.intel.h265), hw.intel.h264 || hw.intel.h265 ? ENCODER_CHOICE_LABEL.intel : "Intel (niet beschikbaar)");
+    setOption("amd", Boolean(hw.amd.h264 || hw.amd.h265), hw.amd.h264 || hw.amd.h265 ? ENCODER_CHOICE_LABEL.amd : "AMD (niet beschikbaar)");
     const selected = select.options[select.selectedIndex];
     if (selected?.disabled) {
       select.value = "auto";
@@ -866,13 +862,6 @@ function applyEncoderAvailability(status: FfmpegStatus): void {
       savePreferences();
     }
   }
-  const active = [];
-  if (hw.nvidia.h264 || hw.nvidia.h265) active.push("NVIDIA");
-  if (hw.amd.h264 || hw.amd.h265) active.push("AMD");
-  if (hw.intel.h264 || hw.intel.h265) active.push("Intel");
-  hint.textContent = active.length
-    ? `Automatisch gebruikt ${active.join(" / ")} wanneer beschikbaar; anders CPU. Snellere presets = grotere bestanden bij dezelfde kwaliteit.`
-    : "Geen bruikbare hardware-encoder gevonden; Automatisch gebruikt CPU. Snellere presets = grotere bestanden bij dezelfde kwaliteit.";
 }
 
 async function reprobeQueued(): Promise<void> {

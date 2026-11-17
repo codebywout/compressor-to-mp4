@@ -16,7 +16,6 @@
         </span>
         <div>
           <strong>Video Compressor</strong>
-          <span>Windows</span>
         </div>
       </div>
 
@@ -49,10 +48,10 @@
       <header class="topbar">
         <div>
           <h1 id="page-title">Converter</h1>
-          <p id="page-subtitle">Comprimeer of converteer video’s naar MP4</p>
+          <p id="page-subtitle" class="hidden"></p>
         </div>
         <div class="topbar-actions">
-          <button type="button" id="check-updates" class="btn subtle" title="Controleer op updates">Updates</button>
+          <button type="button" id="check-updates" class="btn subtle" title="Updates">Updates</button>
         </div>
       </header>
 
@@ -92,7 +91,6 @@
                   <p class="drop-empty muted">of kies bestanden op je computer</p>
                 </div>
                 <button id="select-button" class="btn primary" type="button">Bestanden selecteren</button>
-                <small class="muted">TS · M2TS · MP4 · MOV · MKV · AVI</small>
               </div>
 
               <div id="files-section" class="queue-block hidden">
@@ -109,9 +107,9 @@
                   </div>
                 </div>
                 <div class="queue-tools">
-                  <button id="retry-failed" class="btn text" type="button">Mislukte opnieuw</button>
-                  <button id="clear-completed" class="btn text" type="button">Voltooide wissen</button>
-                  <button id="clear-button" class="btn text danger" type="button">Niet-actieve wissen</button>
+                  <button id="retry-failed" class="btn text" type="button">Opnieuw proberen</button>
+                  <button id="clear-completed" class="btn text" type="button">Klaar wissen</button>
+                  <button id="clear-button" class="btn text danger" type="button">Lijst legen</button>
                 </div>
                 <div class="table-wrap">
                   <table class="file-table" aria-label="Wachtrij">
@@ -143,78 +141,84 @@
                 <div class="mode-grid" role="radiogroup" aria-label="Verwerkingsmodus">
                   <label class="mode-card">
                     <input type="radio" name="processing-mode" value="compress" checked>
-                    <span><strong>Comprimeren</strong><small>Maximale bestandsgrootte</small></span>
+                    <span><strong>Comprimeren</strong><small>Kleiner maken</small></span>
                   </label>
                   <label class="mode-card">
                     <input type="radio" name="processing-mode" value="convert">
-                    <span><strong>Converteren</strong><small>Alleen naar MP4</small></span>
+                    <span><strong>Converteren</strong><small>Naar MP4</small></span>
                   </label>
                 </div>
 
                 <div class="form-grid">
-                  <label id="target-mb-field" class="span-2">Doelgrootte (MB)
+                  <label id="target-mb-field" class="span-2">Max. grootte (MB)
                     <input id="target-mb" type="number" min="1" step="1" value="50" inputmode="numeric">
                   </label>
-                  <label id="audio-field">Audio (kbps)
-                    <select id="audio-bitrate"><option>48</option><option>64</option><option>96</option><option selected>128</option><option>160</option><option>192</option></select>
-                  </label>
-                  <label id="codec-field">Videocodec
-                    <select id="video-codec"><option value="h264" selected>H.264</option><option value="h265">H.265</option></select>
-                  </label>
-                  <label id="encoder-field">Encoder
-                    <select id="encoder-preference">
-                      <option value="auto" selected>Automatisch</option>
-                      <option value="cpu">CPU</option>
-                      <option value="nvidia">NVIDIA</option>
-                      <option value="intel">Intel</option>
-                      <option value="amd">AMD</option>
+                  <label id="audio-field">Audio
+                    <select id="audio-bitrate">
+                      <option value="48">Laag</option>
+                      <option value="64">Matig</option>
+                      <option value="96">Normaal</option>
+                      <option value="128" selected>Hoog</option>
+                      <option value="160">Zeer hoog</option>
+                      <option value="192">Maximaal</option>
                     </select>
                   </label>
-                  <label id="preset-field">Preset
-                    <select id="preset">
-                      <option value="ultrafast">ultrafast</option>
-                      <option value="veryfast">veryfast</option>
-                      <option value="faster">faster</option>
-                      <option value="fast">fast</option>
-                      <option value="medium" selected>medium</option>
-                      <option value="slow">slow</option>
-                    </select>
-                  </label>
-                  <label id="concurrency-field">Tegelijk
-                    <select id="concurrency">
-                      <option value="0">Auto</option>
-                      <option value="1" selected>1</option>
-                      <option value="2">2</option>
-                      <option value="3">3</option>
-                      <option value="4">4</option>
-                      <option value="6">6</option>
-                      <option value="8">8</option>
-                    </select>
-                  </label>
+                  <label class="check span-2" id="keep-audio-field"><input id="keep-audio" type="checkbox" checked><span>Geluid behouden</span></label>
                 </div>
-                <p id="encoder-hint" class="muted">Automatisch kiest de snelste bruikbare hardware-encoder, anders CPU.</p>
-                <p id="convert-note" class="muted hidden">Eerst stream copy; bij mislukken volgt H.264/AAC.</p>
+                <p id="encoder-hint" class="hidden" aria-hidden="true"></p>
+                <p id="convert-note" class="hidden" aria-hidden="true"></p>
 
                 <details id="advanced-toggle" class="advanced">
-                  <summary>Geavanceerd</summary>
+                  <summary>Meer opties</summary>
                   <div id="advanced-options" class="form-grid">
+                    <label id="codec-field">Formaat
+                      <select id="video-codec"><option value="h264" selected>Standaard</option><option value="h265">Kleiner bestand</option></select>
+                    </label>
+                    <label id="encoder-field">Versnelling
+                      <select id="encoder-preference">
+                        <option value="auto" selected>Automatisch</option>
+                        <option value="cpu">Computer</option>
+                        <option value="nvidia">NVIDIA</option>
+                        <option value="intel">Intel</option>
+                        <option value="amd">AMD</option>
+                      </select>
+                    </label>
+                    <label id="preset-field">Snelheid
+                      <select id="preset">
+                        <option value="ultrafast">Snelst</option>
+                        <option value="veryfast">Zeer snel</option>
+                        <option value="faster">Snel</option>
+                        <option value="fast">Vlot</option>
+                        <option value="medium" selected>Normaal</option>
+                        <option value="slow">Beter</option>
+                      </select>
+                    </label>
+                    <label id="concurrency-field">Tegelijk
+                      <select id="concurrency">
+                        <option value="0">Automatisch</option>
+                        <option value="1" selected>1</option>
+                        <option value="2">2</option>
+                        <option value="3">3</option>
+                        <option value="4">4</option>
+                        <option value="6">6</option>
+                        <option value="8">8</option>
+                      </select>
+                    </label>
                     <label>Resolutie
-                      <select id="resolution"><option value="original">Origineel</option><option>1080p</option><option>720p</option><option>480p</option></select>
+                      <select id="resolution"><option value="original">Ongewijzigd</option><option>1080p</option><option>720p</option><option>480p</option></select>
                     </label>
-                    <label>Framerate
-                      <select id="framerate"><option value="original">Origineel</option><option>24</option><option>25</option><option>30</option><option>60</option></select>
+                    <label>Beelden/sec
+                      <select id="framerate"><option value="original">Ongewijzigd</option><option>24</option><option>25</option><option>30</option><option>60</option></select>
                     </label>
-                    <label class="check span-2"><input id="keep-audio" type="checkbox" checked><span>Audio behouden</span></label>
                   </div>
                 </details>
 
-                <p class="muted">MP4 komt naast het bronbestand. Een doelgrootte op een rij geldt alleen voor dat bestand.</p>
-                <button id="reset-targets" class="btn secondary wide" type="button">Afwijkende doelgroottes wissen</button>
+                <button id="reset-targets" class="btn secondary wide" type="button">Eigen groottes resetten</button>
               </section>
 
               <section class="panel detail-panel" id="detail-panel">
-                <div class="section-bar"><h2>Details</h2></div>
-                <p id="detail-empty" class="muted">Selecteer een bestand in de wachtrij.</p>
+                <div class="section-bar"><h2>Info</h2></div>
+                <p id="detail-empty" class="muted">Kies een bestand links.</p>
                 <dl id="detail-body" class="detail-list hidden"></dl>
               </section>
             </aside>
@@ -227,9 +231,8 @@
             <div class="section-bar">
               <div>
                 <h2>Geschiedenis</h2>
-                <p class="muted">Voltooide en mislukte jobs van deze installatie. Gescheiden van de actieve wachtrij.</p>
               </div>
-              <button id="history-clear" class="btn secondary" type="button">Geschiedenis legen</button>
+              <button id="history-clear" class="btn secondary" type="button">Legen</button>
             </div>
             <div class="table-wrap">
               <table class="file-table" aria-label="Geschiedenis">
@@ -257,41 +260,49 @@
             <section class="panel">
               <h2>Uiterlijk</h2>
               <div class="theme-grid" role="radiogroup" aria-label="Thema">
-                <label class="choice-card"><input type="radio" name="theme" value="system" checked><span><strong>Windows</strong><small>Systeemthema volgen</small></span></label>
-                <label class="choice-card"><input type="radio" name="theme" value="light"><span><strong>Licht</strong><small>Altijd licht</small></span></label>
-                <label class="choice-card"><input type="radio" name="theme" value="dark"><span><strong>Donker</strong><small>Altijd donker</small></span></label>
+                <label class="choice-card"><input type="radio" name="theme" value="system" checked><span><strong>Systeem</strong></span></label>
+                <label class="choice-card"><input type="radio" name="theme" value="light"><span><strong>Licht</strong></span></label>
+                <label class="choice-card"><input type="radio" name="theme" value="dark"><span><strong>Donker</strong></span></label>
               </div>
             </section>
 
             <section class="panel">
-              <h2>Standaardwaarden</h2>
-              <p class="muted">Deze waarden worden ook op de Converterpagina gebruikt en persistent opgeslagen.</p>
+              <h2>Standaard</h2>
               <div class="form-grid settings-defaults">
-                <label>Doelgrootte (MB)<input id="settings-target-mb" type="number" min="1" step="1" value="50"></label>
-                <label>Audio (kbps)<select id="settings-audio"><option>48</option><option>64</option><option>96</option><option selected>128</option><option>160</option><option>192</option></select></label>
-                <label>Videocodec<select id="settings-codec"><option value="h264" selected>H.264</option><option value="h265">H.265</option></select></label>
-                <label>Encoder
+                <label>Max. grootte (MB)<input id="settings-target-mb" type="number" min="1" step="1" value="50"></label>
+                <label>Audio
+                  <select id="settings-audio">
+                    <option value="48">Laag</option>
+                    <option value="64">Matig</option>
+                    <option value="96">Normaal</option>
+                    <option value="128" selected>Hoog</option>
+                    <option value="160">Zeer hoog</option>
+                    <option value="192">Maximaal</option>
+                  </select>
+                </label>
+                <label>Formaat<select id="settings-codec"><option value="h264" selected>Standaard</option><option value="h265">Kleiner bestand</option></select></label>
+                <label>Versnelling
                   <select id="settings-encoder">
                     <option value="auto" selected>Automatisch</option>
-                    <option value="cpu">CPU</option>
+                    <option value="cpu">Computer</option>
                     <option value="nvidia">NVIDIA</option>
                     <option value="intel">Intel</option>
                     <option value="amd">AMD</option>
                   </select>
                 </label>
-                <label>Preset
+                <label>Snelheid
                   <select id="settings-preset">
-                    <option value="ultrafast">ultrafast</option>
-                    <option value="veryfast">veryfast</option>
-                    <option value="faster">faster</option>
-                    <option value="fast">fast</option>
-                    <option value="medium" selected>medium</option>
-                    <option value="slow">slow</option>
+                    <option value="ultrafast">Snelst</option>
+                    <option value="veryfast">Zeer snel</option>
+                    <option value="faster">Snel</option>
+                    <option value="fast">Vlot</option>
+                    <option value="medium" selected>Normaal</option>
+                    <option value="slow">Beter</option>
                   </select>
                 </label>
-                <label>Paralleliteit
+                <label>Tegelijk
                   <select id="settings-concurrency">
-                    <option value="0">Auto</option>
+                    <option value="0">Automatisch</option>
                     <option value="1" selected>1</option>
                     <option value="2">2</option>
                     <option value="3">3</option>
@@ -300,24 +311,23 @@
                     <option value="8">8</option>
                   </select>
                 </label>
-                <label>Resolutie<select id="settings-resolution"><option value="original">Origineel</option><option>1080p</option><option>720p</option><option>480p</option></select></label>
-                <label>Framerate<select id="settings-framerate"><option value="original">Origineel</option><option>24</option><option>25</option><option>30</option><option>60</option></select></label>
-                <label class="check"><input id="settings-keep-audio" type="checkbox" checked><span>Audio behouden</span></label>
+                <label>Resolutie<select id="settings-resolution"><option value="original">Ongewijzigd</option><option>1080p</option><option>720p</option><option>480p</option></select></label>
+                <label>Beelden/sec<select id="settings-framerate"><option value="original">Ongewijzigd</option><option>24</option><option>25</option><option>30</option><option>60</option></select></label>
+                <label class="check"><input id="settings-keep-audio" type="checkbox" checked><span>Geluid behouden</span></label>
               </div>
             </section>
 
             <section class="panel" id="ffmpeg-panel">
-              <h2>FFmpeg</h2>
+              <h2>Video-hulpmiddel</h2>
               <p id="ffmpeg-status" class="status-line">Bezig met zoeken…</p>
-              <p class="muted">Locatie: <span id="ffmpeg-location">—</span></p>
-              <p id="ffmpeg-codecs" class="muted">Codecs worden gecontroleerd…</p>
+              <p class="muted hidden" id="ffmpeg-location-row">Locatie: <span id="ffmpeg-location">—</span></p>
+              <p id="ffmpeg-codecs" class="muted"></p>
               <div class="btn-row">
-                <button id="ffmpeg-recheck" class="btn secondary" type="button">Opnieuw controleren</button>
-                <button id="ffmpeg-select" class="btn secondary" type="button">Installatie kiezen</button>
-                <button id="ffmpeg-install-button" class="btn primary" type="button">Automatisch installeren</button>
+                <button id="ffmpeg-recheck" class="btn secondary" type="button">Opnieuw</button>
+                <button id="ffmpeg-select" class="btn secondary" type="button">Map kiezen</button>
+                <button id="ffmpeg-install-button" class="btn primary" type="button">Installeren</button>
               </div>
               <div id="ffmpeg-install" class="hidden">
-                <p class="muted">Download zonder administratorrechten. PATH wordt niet gewijzigd.</p>
                 <div class="progress"><div id="ffmpeg-install-progress"></div></div>
               </div>
             </section>
@@ -326,9 +336,9 @@
               <h2>Updates</h2>
               <p id="settings-update-status" class="status-line">Nog niet gecontroleerd.</p>
               <div class="btn-row">
-                <button id="settings-update-check" class="btn secondary" type="button">Controleer op updates</button>
-                <button id="settings-update-download" class="btn primary hidden" type="button">Nu updaten</button>
-                <button id="settings-update-install" class="btn primary hidden" type="button">Herstart en installeer</button>
+                <button id="settings-update-check" class="btn secondary" type="button">Controleren</button>
+                <button id="settings-update-download" class="btn primary hidden" type="button">Updaten</button>
+                <button id="settings-update-install" class="btn primary hidden" type="button">Herstarten</button>
               </div>
             </section>
           </div>
@@ -337,12 +347,12 @@
         <!-- ABOUT -->
         <section id="page-about" class="page" data-page-panel="about" hidden>
           <div class="panel about-panel">
-            <h2>Over Video Compressor</h2>
+            <h2>Over</h2>
             <dl class="detail-list" id="about-list"></dl>
             <div class="btn-row">
-              <button id="about-copy" class="btn secondary" type="button">Diagnostiek kopiëren</button>
+              <button id="about-copy" class="btn secondary" type="button">Info kopiëren</button>
               <a id="about-github" class="btn secondary" href="https://github.com/codebywout/compressor-to-mp4" target="_blank" rel="noreferrer">GitHub</a>
-              <a id="about-releases" class="btn secondary" href="https://github.com/codebywout/compressor-to-mp4/releases" target="_blank" rel="noreferrer">Releases</a>
+              <a id="about-releases" class="btn secondary" href="https://github.com/codebywout/compressor-to-mp4/releases" target="_blank" rel="noreferrer">Updates</a>
             </div>
           </div>
         </section>
@@ -353,12 +363,12 @@
           <div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Batchvoortgang">
             <div id="batch-progress-bar"></div>
           </div>
-          <p id="batch-summary">Voeg bestanden toe om te beginnen.</p>
-          <p id="start-hint" class="muted"></p>
+          <p id="batch-summary">Voeg video’s toe om te starten.</p>
+          <p id="start-hint" class="muted hidden"></p>
         </div>
         <div class="btn-row">
-          <button id="cancel-button" class="btn secondary danger hidden" type="button">Annuleer batch</button>
-          <button id="compress-button" class="btn primary" type="button">Start compressie</button>
+          <button id="cancel-button" class="btn secondary danger hidden" type="button">Stoppen</button>
+          <button id="compress-button" class="btn primary" type="button">Start</button>
         </div>
       </footer>
     </div>
