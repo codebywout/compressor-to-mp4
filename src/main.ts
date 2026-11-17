@@ -22,6 +22,13 @@ const SHORTCUT_NAME = "Video Compressor.lnk";
 
 if (process.platform === "win32") {
   app.setAppUserModelId(APP_USER_MODEL_ID);
+  // Hybrid NVIDIA/AMD laptops can hang Chromium GPU init so the window never appears.
+  app.disableHardwareAcceleration();
+}
+
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) {
+  app.quit();
 }
 
 /** Installatiemap (naast de .exe) of de projectmap tijdens ontwikkeling. */
@@ -62,6 +69,7 @@ function ensureWindowsShortcuts(): void {
 }
 
 let activeBatch: BatchManager | null = null;
+let mainWindow: BrowserWindow | null = null;
 
 function requirePath(value: unknown, name: string): string {
   if (typeof value !== "string" || !value.trim() || value.includes("\0") || !isAbsolute(value)) throw new Error(`${name} moet een absoluut bestandspad zijn.`);
@@ -80,6 +88,13 @@ function validateBatchItem(item: BatchItem): void {
   if (!["auto", "cpu", "nvidia", "intel", "amd"].includes(preference)) throw new Error("Ongeldige encoderkeuze.");
 }
 
+function showMainWindow(window: BrowserWindow): void {
+  if (window.isDestroyed()) return;
+  if (!window.isVisible()) window.show();
+  if (window.isMinimized()) window.restore();
+  window.focus();
+}
+
 function createWindow(): BrowserWindow {
   const window = new BrowserWindow({
     width: 1280, height: 900, minWidth: 1100, minHeight: 700,
@@ -92,9 +107,19 @@ function createWindow(): BrowserWindow {
       sandbox: false
     }
   });
-  window.once("ready-to-show", () => window.show());
+  // ready-to-show can hang on some GPU/driver setups; always force-show as fallback.
+  let shown = false;
+  const reveal = (): void => {
+    if (shown || window.isDestroyed()) return;
+    shown = true;
+    showMainWindow(window);
+  };
+  window.once("ready-to-show", reveal);
+  window.webContents.once("did-finish-load", reveal);
+  setTimeout(reveal, 1500);
   window.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL) => {
     console.error(`[Renderer] Failed to load (${errorCode}): ${errorDescription} - ${validatedURL}`);
+    reveal();
   });
   window.webContents.on("console-message", (_event, level, message, line, sourceId) => {
     console.log(`[Renderer] level=${level} ${sourceId}:${line} ${message}`);
@@ -103,13 +128,21 @@ function createWindow(): BrowserWindow {
   return window;
 }
 
+if (gotSingleInstanceLock) {
 app.whenReady().then(() => {
-  ensureWindowsShortcuts();
-  const staleWork = cleanupStaleWorkDirs();
-  if (staleWork.removed.length || staleWork.failed.length) {
-    console.log(`[TempCleanup] scanned=${staleWork.scanned} removed=${staleWork.removed.length} failed=${staleWork.failed.length}`);
-  }
+  // Show the window first; shortcuts/cleanup must not delay first paint.
   const window = createWindow();
+  mainWindow = window;
+  window.on("closed", () => {
+    if (mainWindow === window) mainWindow = null;
+  });
+  setImmediate(() => {
+    ensureWindowsShortcuts();
+    const staleWork = cleanupStaleWorkDirs();
+    if (staleWork.removed.length || staleWork.failed.length) {
+      console.log(`[TempCleanup] scanned=${staleWork.scanned} removed=${staleWork.removed.length} failed=${staleWork.failed.length}`);
+    }
+  });
   const provider = new FfmpegProvider(join(process.resourcesPath, "ffmpeg"), appDirectory());
   const updater = new AppUpdater();
   let binaryStatus = provider.getStatus();
@@ -267,6 +300,11 @@ app.whenReady().then(() => {
     window.webContents.send("binaries", binaryStatus);
     window.webContents.send("binary-error", binaryStatus.message);
   });
+});
+} // gotSingleInstanceLock
+
+app.on("second-instance", () => {
+  if (mainWindow && !mainWindow.isDestroyed()) showMainWindow(mainWindow);
 });
 
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
